@@ -1,0 +1,6 @@
+.venv
+apps/web/node_modules
+apps/web/.next
+.env
+data
+.git

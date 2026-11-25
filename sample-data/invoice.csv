@@ -1,0 +1,2 @@
+invoice_number,invoice_date,supplier_name,customer_name,subtotal,tax,total,currency,discount,shipping,credit,tax_inclusive
+CG-2026-001,2026-11-20,Synthetic Northstar Supplies,Synthetic Harbor Studio,200.00,20.00,220.00,USD,,,,

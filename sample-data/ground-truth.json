@@ -1,0 +1,344 @@
+{
+  "label": "SYNTHETIC FIXTURES",
+  "documents": {
+    "invoice.pdf": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "invalid_total": false
+    },
+    "duplicate.pdf": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "invalid_total": false
+    },
+    "incorrect-total.pdf": {
+      "invoice": {
+        "invoice_number": "CG-2026-002",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "250.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "invalid_total": true
+    },
+    "missing-fields.pdf": {
+      "invoice": {
+        "invoice_number": "CG-2026-003",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": null,
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "invalid_total": false
+    },
+    "multipage.pdf": {
+      "invoice": {
+        "invoice_number": "CG-2026-004",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "invalid_total": false
+    },
+    "invoice.png": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "ocr": true
+    },
+    "invoice.jpg": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "ocr": true
+    },
+    "multiframe.tiff": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "ocr": true
+    },
+    "low-quality.png": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "ocr": true
+    },
+    "scanned.pdf": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [
+          {
+            "description": "Consulting",
+            "quantity": "2",
+            "unit_price": "100.00",
+            "line_amount": "200.00",
+            "tax_amount": "20.00",
+            "currency": null
+          }
+        ],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "ocr": true
+    },
+    "accounting.xlsx": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "225.00",
+        "currency": "USD",
+        "line_items": [],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "invalid_total": true
+    },
+    "accounting.xls": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "225.00",
+        "currency": "USD",
+        "line_items": [],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success",
+      "invalid_total": true
+    },
+    "invoice.csv": {
+      "invoice": {
+        "invoice_number": "CG-2026-001",
+        "invoice_date": "2026-11-20",
+        "supplier_name": "Synthetic Northstar Supplies",
+        "customer_name": "Synthetic Harbor Studio",
+        "subtotal": "200.00",
+        "tax": "20.00",
+        "total": "220.00",
+        "currency": "USD",
+        "line_items": [],
+        "discount": null,
+        "shipping": null,
+        "credit": null,
+        "tax_inclusive": null
+      },
+      "expected_processing": "success"
+    },
+    "corrupted.pdf": {
+      "expected_processing": "failure"
+    }
+  }
+}
