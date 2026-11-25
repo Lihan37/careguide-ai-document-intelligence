@@ -26,6 +26,8 @@ LABELS = {
     'bill to': 'customer_name', 'billed to': 'customer_name', 'sold to': 'customer_name',
     'sub total': 'subtotal', 'subtotal': 'subtotal',
     'vat': 'tax', 'tax': 'tax', 'tax amount': 'tax', 'vat amount': 'tax',
+    'sales tax': 'tax', 'sales tax amount': 'tax',
+    'gst': 'tax', 'gst amount': 'tax',
     'grand total': 'total', 'total amount': 'total', 'total': 'total',
     'currency': 'currency', 'discount': 'discount', 'shipping': 'shipping',
     'credit': 'credit', 'due date': '_due_date',
@@ -42,7 +44,16 @@ TABLE_LABELS = {
     'amount': 'line_amount', 'lineamount': 'line_amount',
     'linetotal': 'line_amount', 'total': 'line_amount',
     'tax': 'tax_amount', 'vat': 'tax_amount', 'taxamount': 'tax_amount',
+    'salestax': 'tax_amount', 'gst': 'tax_amount', 'gstamount': 'tax_amount',
+    'vatamount': 'tax_amount', 'salestaxamount': 'tax_amount',
 }
+
+TAX_LABEL_ANNOTATION = re.compile(
+    r'^(?P<label>(?:sales[\s_]+tax|tax|vat|gst)(?:[\s_]+amount)?)'
+    r'\s*\(\s*(?:(?:sales\s+tax|tax|vat|gst)\s*)?(?:(?:@|at)\s*)?'
+    r'\d+(?:[.,]\d+)?\s*%\s*\)(?=\s|:|$)',
+    re.IGNORECASE,
+)
 
 
 def currencies(value):
@@ -105,8 +116,12 @@ def invoice_date(value):
 
 def label_pair(text):
     text = text.strip()
-    # VAT (10%) is a label; the printed amount, not the rate, is the tax value.
-    text = re.sub(r'\s*\(\s*\d+(?:[.,]\d+)?\s*%\s*\)', '', text)
+    # Titles are not field/value pairs. In particular, 'INVOICE' is not tax.
+    if re.fullmatch(r'(?:tax|vat|gst|sales\s+tax)\s+invoice', text, re.IGNORECASE):
+        return None, ''
+    # Normalize only a tax label's rate annotation, never an observed value.
+    # 'Tax (VAT 10%)' and 'VAT (10%)' both refer to the printed tax amount.
+    text = TAX_LABEL_ANNOTATION.sub(r'\g<label>', text)
     if ':' in text:
         label, value = text.split(':', 1)
         if key(label) in ALIASES:
@@ -164,7 +179,14 @@ def visual_rows(unit):
 
 
 def table_header(cells):
-    columns = [(i, TABLE_LABELS[key(cell)]) for i, cell in enumerate(cells) if key(cell) in TABLE_LABELS]
+    columns = []
+    for i, cell in enumerate(cells):
+        name = TABLE_LABELS.get(key(cell))
+        field, value = label_pair(str(cell))
+        if name is None and field == 'tax' and not value:
+            name = 'tax_amount'
+        if name is not None:
+            columns.append((i, name))
     fields = {field for _, field in columns}
     return columns if 'description' in fields and len(fields - {'description'}) >= 2 else []
 
@@ -284,7 +306,14 @@ def extract_invoice(source_units):
         # Canonical spreadsheet header/data record (existing supported workflow).
         sheet_rows = unit.get('rows', [])
         if sheet_rows:
-            headers = {i: ALIASES[key(value)] for i, value in enumerate(sheet_rows[0]) if key(value) in ALIASES}
+            headers = {}
+            for i, value in enumerate(sheet_rows[0]):
+                if key(value) in ALIASES:
+                    headers[i] = ALIASES[key(value)]
+                    continue
+                field, inline = label_pair(str(value))
+                if field and not inline:
+                    headers[i] = field
             if len(headers) >= 3 and len(sheet_rows) > 1:
                 for column, field in headers.items():
                     raw = sheet_rows[1][column] if column < len(sheet_rows[1]) else None

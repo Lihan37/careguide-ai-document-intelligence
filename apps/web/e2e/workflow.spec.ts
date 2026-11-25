@@ -8,6 +8,34 @@ const envText = fs
   .replace(/^\uFEFF/, "");
 const password = envText.match(/^DEMO_PASSWORD=(.+)$/m)?.[1].trim();
 
+test('compound VAT label preserves printed tax and all four invoice items', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Password', { exact: true }).fill(password!);
+  await page.getByRole('button', { name: 'Sign in to workspace' }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Upload Documents', exact: true }).click();
+  await page.getByLabel('Choose documents').setInputFiles(path.join(root, 'sample-data/tax-layout-invoice.pdf'));
+  await page.getByRole('button', { name: 'Upload 1 document', exact: true }).click();
+  await page.getByRole('link', { name: 'Open document', exact: true }).click();
+  await expect(page.getByText('Eastern Digital Solutions Ltd.', { exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByText('965.00', { exact: true })).toBeVisible();
+  const id = new URL(page.url()).pathname.split('/').pop();
+  const response = await page.request.get(`http://localhost:8000/api/documents/${id}`);
+  expect(response.ok()).toBeTruthy();
+  const record = await response.json();
+  expect(record.raw.invoice_number).toBe('EDS-INV-2026-042');
+  expect(record.raw.subtotal).toBe('9650.00');
+  expect(record.raw.tax).toBe('965.00');
+  expect(record.raw.total).toBe('10615.00');
+  expect(record.raw.currency).toBe('BDT');
+  expect(record.raw.line_items).toHaveLength(4);
+  expect(record.evidence.tax.excerpt).toContain('Tax (VAT 10%)');
+  expect(record.issues.filter((issue: { severity: string }) => ['FAILED', 'REQUIRES_REVIEW'].includes(issue.severity))).toEqual([]);
+  await page.getByRole('tab', { name: /^Validation/ }).click();
+  await expect(page.getByText('Required Tax', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Invalid Tax', { exact: true })).toHaveCount(0);
+});
+
 test('positioned invoice extracts names, currency, totals and four table rows', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill(password!);

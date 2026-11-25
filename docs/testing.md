@@ -1,6 +1,8 @@
 # Tests and verification
 
-Latest extraction regression verification: **84 pytest cases passed, 4 OCR cases explicitly skipped; 3 real browser workflows passed**. See [extraction investigation](extraction-fix.md) for the actual reprocessed document, broader layout cases and remaining provider limits. The checkpoint table below records the original implementation run; browser-results.json remains that historical run rather than fabricated replacement metrics.
+Latest tax regression verification: **144 backend cases passed, 4 OCR cases explicitly skipped; 4 real browser workflows passed**. Production build and standalone TypeScript checks passed. See [tax investigation](tax-extraction-fix.md) for the original second invoice, both review issues, normalized tax labels and exact saved results.
+
+Previous layout regression verification: **84 pytest cases passed, 4 OCR cases explicitly skipped; 3 real browser workflows passed**. See [extraction investigation](extraction-fix.md) for the first reprocessed document, broader layout cases and remaining provider limits. The checkpoint table below records the original implementation run; browser-results.json remains that historical run rather than fabricated replacement metrics.
 
 Verified on Windows with Python 3.13 and Node 22.17. Results are actual command outputs, not projections.
 
