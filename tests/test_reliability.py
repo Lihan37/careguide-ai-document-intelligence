@@ -121,7 +121,11 @@ def test_invalid_corrections_and_keyword_literals(client):
     id = upload(client)
     assert client.patch(f'/api/documents/{id}/corrections', json={'fields': {'total': 'NaN'}, 'reason': 'bad number'}).status_code == 422
     assert client.patch(f'/api/documents/{id}/corrections', json={'fields': {'owner_id': 'someone'}, 'reason': 'bad field'}).status_code == 422
-    assert client.get('/api/search', params={'q': '%'}).json()['total'] == 0
+    matches = client.get('/api/search', params={'q': '%'}).json()['items']
+    # Other fixtures may genuinely print percentages. '%' must match literal
+    # source text, rather than acting as a wildcard matching every invoice.
+    assert id not in {row['id'] for row in matches}
+    assert all('%' in client.get(f'/api/documents/{row["id"]}').json()['text'] for row in matches)
 
 
 def test_retry_limit_and_queue_cancellation(client, monkeypatch):

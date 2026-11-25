@@ -8,6 +8,31 @@ const envText = fs
   .replace(/^\uFEFF/, "");
 const password = envText.match(/^DEMO_PASSWORD=(.+)$/m)?.[1].trim();
 
+test('positioned invoice extracts names, currency, totals and four table rows', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Password', { exact: true }).fill(password!);
+  await page.getByRole('button', { name: 'Sign in to workspace' }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Upload Documents', exact: true }).click();
+  await page.getByLabel('Choose documents').setInputFiles(path.join(root, 'sample-data/layout-invoice.pdf'));
+  await page.getByRole('button', { name: 'Upload 1 document', exact: true }).click();
+  await page.getByRole('link', { name: 'Open document', exact: true }).click();
+  await expect(page.getByText('Northstar Office Supplies Ltd.', { exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByText('CareGuide Demo Operations', { exact: true })).toBeVisible();
+  await expect(page.getByText('9350.00', { exact: true })).toBeVisible();
+  const documentId = new URL(page.url()).pathname.split('/').pop();
+  const response = await page.request.get(`http://localhost:8000/api/documents/${documentId}`);
+  expect(response.ok()).toBeTruthy();
+  const record = await response.json();
+  expect(record.raw.invoice_number).toBe('CG-2026-001');
+  expect(record.raw.subtotal).toBe('8500.00');
+  expect(record.raw.tax).toBe('850.00');
+  expect(record.raw.currency).toBe('BDT');
+  expect(record.raw.line_items).toHaveLength(4);
+  expect(record.evidence.line_items.items[0].quantity.bbox).toHaveLength(4);
+  expect(record.issues.filter((issue: { severity: string }) => ['FAILED', 'REQUIRES_REVIEW'].includes(issue.severity))).toEqual([]);
+});
+
 test("real invoice upload, processing, validation, correction, search and comparison", async ({
   page,
 }) => {

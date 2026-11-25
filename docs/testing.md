@@ -1,5 +1,7 @@
 # Tests and verification
 
+Latest extraction regression verification: **84 pytest cases passed, 4 OCR cases explicitly skipped; 3 real browser workflows passed**. See [extraction investigation](extraction-fix.md) for the actual reprocessed document, broader layout cases and remaining provider limits. The checkpoint table below records the original implementation run; browser-results.json remains that historical run rather than fabricated replacement metrics.
+
 Verified on Windows with Python 3.13 and Node 22.17. Results are actual command outputs, not projections.
 
 | Check | Result |

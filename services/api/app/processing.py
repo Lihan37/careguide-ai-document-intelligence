@@ -125,7 +125,8 @@ def units(path: Path, extension: str):
                         text, confidence = ocr(image)
                     del pix
                     method = 'tesseract_ocr'
-                yield {'page': index + 1, 'total': pdf.page_count, 'text': text, 'blocks': blocks, 'method': method, 'ocr_confidence': confidence}
+                words = [{'bbox': list(word[:4]), 'text': word[4]} for word in page.get_text('words')] if method == 'digital_pdf' else []
+                yield {'page': index + 1, 'total': pdf.page_count, 'text': text, 'blocks': blocks, 'words': words, 'method': method, 'ocr_confidence': confidence}
     elif extension in {'.jpg', '.jpeg', '.png', '.tif', '.tiff'}:
         Image.MAX_IMAGE_PIXELS = cfg.max_image_pixels
         with Image.open(path) as image:
