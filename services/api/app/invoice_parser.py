@@ -18,7 +18,8 @@ LABELS = {
     'invoice number': 'invoice_number', 'invoice no': 'invoice_number',
     'invoice #': 'invoice_number', 'invoice id': 'invoice_number',
     'invoice': 'invoice_number', 'invoice date': 'invoice_date',
-    'issue date': 'invoice_date', 'date issued': 'invoice_date', 'date of issue': 'invoice_date', 'date': 'invoice_date',
+    'issue date': 'invoice_date', 'date issued': 'invoice_date', 'date of issue': 'invoice_date',
+    'issued on': 'invoice_date', 'dated': 'invoice_date', 'date': 'invoice_date',
     'supplier name': 'supplier_name', 'supplier': 'supplier_name',
     'bill from': 'supplier_name', 'billed from': 'supplier_name', 'issued by': 'supplier_name',
     'vendor': 'supplier_name', 'sold by': 'supplier_name', 'seller': 'supplier_name', 'seller name': 'supplier_name',
@@ -30,9 +31,10 @@ LABELS = {
     'sales tax': 'tax', 'sales tax amount': 'tax',
     'gst': 'tax', 'gst amount': 'tax',
     'grand total': 'total', 'total amount due': 'total', 'amount due': 'total', 'total amount': 'total', 'total': 'total',
-    'currency': 'currency', 'discount': 'discount', 'shipping': 'shipping',
+    'currency': 'currency', 'invoice currency': 'currency', 'currency code': 'currency', 'all amounts in': 'currency',
+    'discount': 'discount', 'shipping': 'shipping',
     'delivery & handling': 'shipping', 'shipping & handling': 'shipping',
-    'credit': 'credit', 'due date': '_due_date', 'payment due': '_due_date',
+    'credit': 'credit', 'due date': '_due_date', 'payment due': '_due_date', 'payment deadline': '_due_date',
 }
 ALIASES = {key(label): field for label, field in LABELS.items()}
 MONETARY = {'subtotal', 'tax', 'total', 'discount', 'shipping', 'credit'}
@@ -45,6 +47,15 @@ QUALIFIED_CURRENCY = {
     '€': 'EUR', '₹': 'INR', '৳': 'BDT',
 }
 CURRENCY_SYMBOL = re.compile(r'(?<![A-Za-z])(?:' + '|'.join(map(re.escape, QUALIFIED_CURRENCY)) + ')')
+CURRENCY_NAMES = {
+    'us dollar': 'USD', 'united states dollar': 'USD', 'canadian dollar': 'CAD',
+    'australian dollar': 'AUD', 'new zealand dollar': 'NZD', 'euro': 'EUR', 'swiss franc': 'CHF',
+    'pound sterling': 'GBP', 'pounds sterling': 'GBP', 'british pound': 'GBP', 'japanese yen': 'JPY',
+    'chinese yuan': 'CNY', 'indian rupee': 'INR', 'bangladeshi taka': 'BDT',
+}
+LEADING_CURRENCY_CODE = re.compile(r'^([a-z]{3})(?=$|[\s(/,;|&:\-–—])', re.IGNORECASE)
+TRAILING_CURRENCY_CODE = re.compile(r'\(([a-z]{3})\)$', re.IGNORECASE)
+ISO_AMOUNT = re.compile(r'(?<![A-Za-z])[A-Z]{3}(?![A-Za-z])')
 TABLE_LABELS = {
     'description': 'description', 'itemdescription': 'description', 'item': 'description',
     'product': 'description', 'details': 'description', 'itemname': 'description', 'productservice': 'description',
@@ -68,6 +79,33 @@ TABLE_CURRENCY_QUALIFIER = re.compile(r'\s*\(([A-Za-z]{3})\)\s*$|\s+([A-Z]{3})\s
 
 def currencies(value):
     return {code.upper() for code in re.findall(r'(?<![A-Za-z])[A-Za-z]{3}(?![A-Za-z])', str(value)) if code.upper() in CODES}
+
+
+def declared_currencies(value):
+    """Read a currency declaration from a labeled field, retaining any conflicting codes."""
+    text = ' '.join(str(value).split())
+
+    def explicit(marker):
+        code = marker.upper()
+        name = marker.casefold()
+        return (code if code in CODES else None) or QUALIFIED_CURRENCY.get(code) or (
+            CURRENCY_NAMES.get(name) or CURRENCY_NAMES.get(name.removesuffix('s'))
+        )
+
+    if code := explicit(text):
+        return {code}
+    prefix = LEADING_CURRENCY_CODE.match(text)
+    if prefix and prefix[1].upper() in CODES:
+        code, qualifier = prefix[1], text[prefix.end():]
+    elif (suffix := TRAILING_CURRENCY_CODE.search(text)) and suffix[1].upper() in CODES:
+        code, qualifier = suffix[1], text[:suffix.start()]
+    else:
+        return set()
+    qualifier = qualifier.strip(' ():/,;|&–—-')
+    alternatives = re.split(r'\b(?:or|and)\b|[/,;|&]', qualifier, flags=re.IGNORECASE)
+    return {code.upper()} | (set(ISO_AMOUNT.findall(qualifier)) & CODES) | {
+        alternate_code for alternative in alternatives if (alternate_code := explicit(alternative.strip(' ()')))
+    }
 
 
 def number(value):
@@ -168,7 +206,7 @@ def normalized(field, value):
     if field in MONETARY:
         return number(value)
     if field == 'currency':
-        codes = currencies(value)
+        codes = declared_currencies(value)
         return next(iter(codes)) if len(codes) == 1 else None
     if field in {'invoice_date', '_due_date'}:
         return invoice_date(value)

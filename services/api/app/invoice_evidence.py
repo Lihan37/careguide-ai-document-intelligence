@@ -3,20 +3,14 @@ import re
 
 from openpyxl.utils.cell import get_column_letter
 
-from .invoice_parser import (CODES, CURRENCY_SYMBOL, MONETARY, PARTY_FIELDS, QUALIFIED_CURRENCY,
-                             header_currency, label_pair, normalized, number, table_header, visual_rows)
+from .invoice_parser import (CODES, CURRENCY_SYMBOL, ISO_AMOUNT, MONETARY, PARTY_FIELDS, QUALIFIED_CURRENCY,
+                             declared_currencies, header_currency, label_pair, normalized, number, table_header,
+                             visual_rows)
 
 
 SOURCE_KEYS = ('document_id', 'page', 'sheet', 'method', 'ocr_confidence')
 VERIFIED_FIELDS = PARTY_FIELDS | {'invoice_date', 'currency'}
-ISO_AMOUNT = re.compile(r'(?<![A-Z])(?:[A-Z]{3})(?![A-Z])')
 AMBIGUOUS_SYMBOL = re.compile(r'[$£¥]')
-CURRENCY_NAMES = {
-    'us dollars': 'USD', 'united states dollars': 'USD', 'canadian dollars': 'CAD',
-    'australian dollars': 'AUD', 'new zealand dollars': 'NZD', 'euros': 'EUR',
-    'pounds sterling': 'GBP', 'british pounds': 'GBP', 'japanese yen': 'JPY',
-    'chinese yuan': 'CNY', 'indian rupees': 'INR', 'bangladeshi taka': 'BDT',
-}
 
 
 def source_label(text):
@@ -26,6 +20,10 @@ def source_label(text):
 
 
 def field_value(field, text):
+    if field == 'currency':
+        # Keep the association even if the declaration is conflicting. The
+        # reconciliation step needs both codes with their source reference.
+        return text if declared_currencies(text) or AMBIGUOUS_SYMBOL.fullmatch(text.strip()) else None
     if field in PARTY_FIELDS:
         if (len(text) > 255 or source_label(text)[0] or not any(char.isalpha() for char in text)
                 or re.search(r'@|https?://|^\d+\s|^(?:address|phone|account|email|contact)\b', text, re.IGNORECASE)):
@@ -47,7 +45,8 @@ def neighboring_value(rows, row, column, label, field):
     if 'bbox' in label:
         x0, y0, x1, y1 = label['bbox']
         height = y1 - y0
-        right = [cell for cell in right if cell['bbox'][0] - x1 <= max(36, 3 * height)]
+        max_gap = max(110, 8 * height) if field in {'invoice_date', 'currency'} else max(36, 3 * height)
+        right = [cell for cell in right if cell['bbox'][0] - x1 <= max_gap]
         next_rows = ([cell for cell in cells if abs(cell['bbox'][0] - x0) <= max(12, 1.3 * height)
                       and 0 < cell['bbox'][1] - y0 <= max(45, 3 * height)]
                      for cells in rows[row + 1:row + 4])
@@ -102,14 +101,8 @@ def evidence(unit, label, cell, basis):
 
 
 def currency_markers(value, *, labeled=False):
-    if labeled:
-        marker = value.strip().upper()
-        if marker in CODES:
-            return {marker}
-        if marker in QUALIFIED_CURRENCY:
-            return {QUALIFIED_CURRENCY[marker]}
-        if named := CURRENCY_NAMES.get(' '.join(value.casefold().split())):
-            return {named}
+    if labeled and (codes := declared_currencies(value)):
+        return codes
     if number(value) is None:
         return set()
     symbols = {QUALIFIED_CURRENCY[symbol] for symbol in CURRENCY_SYMBOL.findall(value)}

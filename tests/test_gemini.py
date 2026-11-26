@@ -11,6 +11,7 @@ import pytest
 from app import gemini
 from app.config import read_local_gemini_key, settings
 from app.extraction import extract
+from app.invoice_parser import extract_invoice
 from app.processing import ocr_available, units
 from app.validation import validate
 from scripts import evaluate_gemini
@@ -139,6 +140,54 @@ def test_gemini_dates_use_issue_label_and_normalize_written_formats(printed):
     assert not issues
 
 
+@pytest.mark.parametrize('layout,date_label,printed_date,currency_label,declaration,code', [
+    ('below', 'ISSUED ON', '16 April 2032', 'INVOICE CURRENCY', 'CAD (Canadian Dollar)', 'CAD'),
+    ('inline', 'Date of Issue', 'April 16, 2032', 'Currency', 'EUR (Euro)', 'EUR'),
+    ('adjacent', 'Invoice Date', '2032-04-16', 'Currency Code', 'CHF (Swiss Franc)', 'CHF'),
+    ('inline', 'Issue Date', '16 April 2032', 'All Amounts in', 'NZD - New Zealand Dollars', 'NZD'),
+    ('below', 'Dated', 'April 16, 2032', 'Currency Code', 'Australian Dollar (AUD)', 'AUD'),
+])
+def test_labeled_date_and_described_currency_from_pdf(tmp_path, layout, date_label, printed_date,
+                                              currency_label, declaration, code):
+    path = tmp_path / 'invoice-with-metadata.pdf'
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        for y, (label, value) in enumerate(((date_label, printed_date), (currency_label, declaration)), start=2):
+            y *= 60
+            if layout == 'inline':
+                page.insert_text((48, y), f'{label}: {value}')
+            else:
+                page.insert_text((48, y), label)
+                x = 48 if layout == 'below' else 180
+                page.insert_text((x, y + 18 if layout == 'below' else y), value)
+        page.insert_text((48, 300), 'Payment Deadline: 29 April 2032')
+        page.insert_text((48, 330), 'Seller: Sample Harbor Supplies')
+        page.insert_text((48, 350), 'Buyer: Fictional Ridge Studio')
+        page.insert_text((48, 370), 'Total: 400.00')
+        pdf.save(path)
+
+    sources = list(units(path, '.pdf'))
+
+    def respond(request):
+        body = json.loads(request.content)
+        context = json.loads(body['contents'][0]['parts'][0]['text'])['labeled_header_context']
+        assert date_label in context['invoice_date'] and printed_date in context['invoice_date']
+        assert currency_label in context['currency'] and declaration in context['currency']
+        return response({'invoice_date': '29 April 2032', 'currency': 'GBP', 'total': '400.00'})
+
+    invoice, evidence, issues, _, _ = mock_extract(sources, respond)
+    assert invoice.invoice_date.isoformat() == '2032-04-16'
+    assert invoice.currency == code and invoice.total == Decimal('400.00')
+    assert (invoice.supplier_name, invoice.customer_name) == ('Sample Harbor Supplies', 'Fictional Ridge Studio')
+    assert not issues
+    for field in ('invoice_date', 'currency'):
+        assert evidence[field]['page'] == 1 and evidence[field]['label_bbox'][0] == 48
+        assert evidence[field]['bbox'][0] == (180 if layout == 'adjacent' else 48)
+    if layout in {'inline', 'below'}:
+        local = extract_invoice(sources)[0]
+        assert (local.invoice_date, local.currency) == (invoice.invoice_date, invoice.currency)
+
+
 @pytest.mark.parametrize('printed', ['Due Date: August 27, 2094', 'Date: 03/04/2094', 'Date: 30 February 2094'])
 def test_gemini_does_not_use_due_ambiguous_or_impossible_dates(printed):
     invoice, evidence, issues, _, _ = mock_extract([source(printed)], lambda _: response({'invoice_date': printed.split(': ')[1]}))
@@ -151,6 +200,12 @@ def test_gemini_does_not_use_due_ambiguous_or_impossible_dates(printed):
     ('Currency: cad\nTotal: $10.00', 'CAD'), ('Total: AU$10.00', 'AUD'),
     ('Currency: Canadian dollars\nTotal: $10.00', 'CAD'),
     ('Currency: dollars\nTotal: $10.00', None),
+    ('Invoice Currency: USD (United States Dollar)', 'USD'),
+    ('Currency Code: EUR (Swiss Franc)\nTotal: 10.00', None),
+    ('All Amounts in NZD – New Zealand Dollars', 'NZD'),
+    ('All Amounts in GBP (Pounds Sterling)\nTotal: 10.00', 'GBP'),
+    ('Invoice Currency: USD (Canadian Dollar)', None),
+    ('Currency Code: usd or cad', None),
     ('Total: US$10.00\nSubtotal: CA$9.00', None),
     ('Supplier: USD Design Agency\nTotal: $10.00', None),
     ('Bank reference:\nUSD 9800\nTotal: $10.00', None),
@@ -160,6 +215,13 @@ def test_gemini_currency_requires_unambiguous_monetary_evidence(text, expected):
     assert invoice.currency == expected
     assert evidence['currency']['page'] == 1
     assert any(i['rule_id'] == 'ambiguous_currency' for i in issues) == (expected is None)
+
+
+def test_currency_label_alone_does_not_verify_the_model_currency():
+    text = 'Invoice Date: 2032-04-16\nInvoice Currency:\nTotal: 10.00'
+    invoice, evidence, issues, _, _ = mock_extract([source(text)], lambda _: response({'currency': 'USD'}))
+    assert invoice.currency is None and 'currency' not in evidence
+    assert [i['rule_id'] for i in issues] == ['gemini_unverified_currency']
 
 
 def test_unlabeled_names_and_conflicting_party_blocks_do_not_become_roles():
