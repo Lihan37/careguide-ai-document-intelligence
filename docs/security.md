@@ -21,11 +21,13 @@
 
 Tests exercise unauthenticated requests, foreign-owner access, viewer mutation, conflicting origins, unsafe uploads, provider errors, cancellation, duplicate deliveries and stale recovery. A dependency advisory scan flagged the former Pillow 12.3.0 pin. After updating to Pillow 13.0.0, `pip-audit` and `npm audit` reported no known findings in the audited lockfiles, and `pip check` passed. The final Git scan checked indexed files for credential signatures and private paths. These checks cover the assessed dependencies and workflows. Production penetration testing remains open. [Pillow release notes](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html)
 
-## Scans with embedded attachments
+## PDF ingestion and Content Credentials
 
-An image-only page can be part of a PDF that contains an embedded file. Document-level C2PA Content Credentials are stored as an attachment and fall under the same rejection policy. The processing worker reports an attachment-specific error before OCR. It also rejects damaged PDFs that require cross-reference repair. [C2PA PDF manifest format](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#a4-embedding-manifests-into-pdfs)
+The worker allows one supported uncompressed document-level C2PA store up to 1 MiB when the PDF references the same file specification from the catalog association and name tree, with no additional inbound references. It checks the JUMBF store, manifest, assertion, claim and signature box framing. Manifest payloads stay opaque. Cryptographic authenticity is unverified. [C2PA PDF manifest format](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#a4-embedding-manifests-into-pdfs)
 
-If you trust the original scan, upload its JPG or PNG directly. For a PDF, use the trusted page images to create a new image-only PDF, with one image per page and attachment or Content Credentials export disabled. Keep the original file to preserve its provenance and upload the new file as a separate document so the original processing history stays available.
+The original stays private and byte-identical. The worker normalizes one visible page at a time into raster pixels or digital text and word geometry. Processing history records the attempt and original checksum. Browser previews serve PNGs from inspected pages, and original PDFs use authenticated downloads.
+
+Unknown attachments, external file streams, automatic actions, JavaScript, rich media, file annotations, encrypted PDFs and PDFs that require repair are rejected. Object, upload, page and image limits apply before page processing. Flate streams expand in bounded chunks with per-stream and document budgets. Unsupported encodings fail closed. A legitimate exporter can save a normal PDF without attachments when its provenance layout falls outside the supported profile.
 
 ## Deployment work remaining
 

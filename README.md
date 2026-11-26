@@ -2,6 +2,8 @@
 
 CareGuide reduces the manual work of reading and reconciling financial documents. Upload files, inspect invoice fields and their sources, verify arithmetic, compare PDF and Excel records, and correct or search results. Originals stay private and corrections retain audit history.
 
+Digital, scanned and mixed PDFs use the same upload flow. Supported document-level C2PA provenance is checked automatically, and only page text or raster pixels reach extraction. The private original remains available as a download. Unsupported attachments and active PDF content are rejected. [PDF ingestion and security](docs/security.md#pdf-ingestion-and-content-credentials)
+
 Built against the supplied **Ai Engineer Task 1.3.pdf** (seven tasks, nine deliverables). The application is intended for local demonstration; no deployment was performed. All bundled financial records are clearly synthetic.
 
 **Verified:** SQLite and PostgreSQL with pgvector, CPU semantic search, Redis/Celery with a real worker, authenticated API, PDF/image/spreadsheet parsing, Tesseract OCR, live Gemini on bundled synthetic invoices, Decimal validation, manual correction, comparisons and Chromium workflows. See the [measured results](docs/evaluation-report.md) and [assessment compliance matrix](docs/assessment-compliance.md).

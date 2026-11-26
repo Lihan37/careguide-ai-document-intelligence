@@ -101,6 +101,27 @@ def test_vertical_labels_and_distinct_due_date():
     assert not issues
 
 
+def test_compound_party_headings_and_annotated_summary_labels():
+    invoice, evidence, issues = parse('''INVOICE DETAILS
+Invoice Number: INV-941
+Invoice Date: 2026-05-21
+Bill From / Supplier: Juniper Paper
+Bill To / Customer: Demo Finance
+Description | Qty | Unit Price | Amount
+Paper stock | 2 | 20.00 | 40.00
+Subtotal (all items): USD 40.00
+Discount (deduction): -USD 5.00
+Delivery & handling: USD 3.00
+VAT (10% on net amount): USD 3.50
+Total Amount Due: USD 41.50''')
+    assert (invoice.supplier_name, invoice.customer_name) == ('Juniper Paper', 'Demo Finance')
+    assert (invoice.subtotal, invoice.discount, invoice.shipping, invoice.tax, invoice.total) == (
+        Decimal('40.00'), Decimal('-5.00'), Decimal('3.00'), Decimal('3.50'), Decimal('41.50'),
+    )
+    assert '10% on net amount' in evidence['tax']['excerpt']
+    assert not issues and not validate(invoice)
+
+
 @pytest.mark.parametrize(('printed', 'expected'), [
     ('BDT 8,500.00', '8500.00'), ('1.234,56 EUR', '1234.56'),
     ('GBP 1 234.50', '1234.50'), ('(USD 20.00)', '-20.00'),

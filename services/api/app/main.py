@@ -275,16 +275,20 @@ def source(document_id: str, page: int | None = Query(None, ge=1), user=Depends(
     if page is not None:
         if document.file_type != '.pdf':
             raise HTTPException(422, 'Page preview is available for PDF documents')
+        if page > document.page_count:
+            raise HTTPException(404, 'Page preview is unavailable')
         import pymupdf
-        with pymupdf.open(document.storage_path) as pdf:
-            if page > pdf.page_count:
-                raise HTTPException(404, 'Page not found')
-            source_page = pdf[page - 1]
-            scale = min(1.0, (settings().max_image_pixels / max(1, source_page.rect.width * source_page.rect.height)) ** 0.5)
-            image = source_page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
-            return Response(image.tobytes('png'), media_type='image/png')
+        from .pdf_ingestion import inspected_pdf, page_pixels
+        cfg = settings()
+        try:
+            with inspected_pdf(Path(document.storage_path), cfg, time.monotonic() + min(cfg.job_timeout, 10)) as (pdf, _):
+                image = page_pixels(pdf[page - 1], cfg.max_image_pixels, 1.0, colorspace=pymupdf.csRGB)
+                return Response(image.tobytes('png'), media_type='image/png')
+        except ProcessingError as exc:
+            raise HTTPException(422, str(exc)) from exc
     media = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.tif': 'image/tiff', '.tiff': 'image/tiff'}.get(document.file_type, 'application/octet-stream')
-    return FileResponse(document.storage_path, media_type=media, filename=document.filename, content_disposition_type='inline' if document.file_type == '.pdf' else 'attachment')
+    return FileResponse(document.storage_path, media_type=media, filename=document.filename, content_disposition_type='attachment',
+                        headers={'X-Content-Type-Options': 'nosniff'})
 
 
 @app.post('/api/documents/{document_id}/reprocess', status_code=202)

@@ -68,6 +68,10 @@ def run_job(job_id):
                 source.append(unit)
                 if not job.preserves_current:
                     db.add(SourceUnit(document_id=document.id, position=position, data=unit))
+                if position == 0 and unit.get('pdf_normalization'):
+                    db.add(Audit(document_id=document.id, user_id=document.owner_id, action='pdf_normalized',
+                                 detail={'job_id': job.id, 'mode': unit['pdf_normalization'], 'page_count': unit['total'],
+                                         'original_sha256': document.checksum, 'authenticity_verified': False}))
                 job.pages_processed = position + 1
                 job.total_pages = unit['total']
                 job.progress = min(70, int(70 * (position + 1) / max(1, unit['total'])))

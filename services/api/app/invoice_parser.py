@@ -28,8 +28,9 @@ LABELS = {
     'vat': 'tax', 'tax': 'tax', 'tax amount': 'tax', 'vat amount': 'tax',
     'sales tax': 'tax', 'sales tax amount': 'tax',
     'gst': 'tax', 'gst amount': 'tax',
-    'grand total': 'total', 'total amount': 'total', 'total': 'total',
+    'grand total': 'total', 'total amount due': 'total', 'total amount': 'total', 'total': 'total',
     'currency': 'currency', 'discount': 'discount', 'shipping': 'shipping',
+    'delivery & handling': 'shipping', 'shipping & handling': 'shipping',
     'credit': 'credit', 'due date': '_due_date',
 }
 ALIASES = {key(label): field for label, field in LABELS.items()}
@@ -48,12 +49,8 @@ TABLE_LABELS = {
     'vatamount': 'tax_amount', 'salestaxamount': 'tax_amount',
 }
 
-TAX_LABEL_ANNOTATION = re.compile(
-    r'^(?P<label>(?:sales[\s_]+tax|tax|vat|gst)(?:[\s_]+amount)?)'
-    r'\s*\(\s*(?:(?:sales\s+tax|tax|vat|gst)\s*)?(?:(?:@|at)\s*)?'
-    r'\d+(?:[.,]\d+)?\s*%\s*\)(?=\s|:|$)',
-    re.IGNORECASE,
-)
+MONEY_LABEL_ANNOTATION = re.compile(r'^(?P<label>[a-z][a-z_ &]*?)\s*\((?P<note>[^()]{1,100})\)(?=\s|:|$)', re.IGNORECASE)
+PARTY_LABEL_PAIR = re.compile(r'^(?P<left>[a-z ]+?)\s*/\s*(?P<right>[a-z]+)(?=\s|:|$)', re.IGNORECASE)
 
 
 def currencies(value):
@@ -70,6 +67,7 @@ def number(value):
     for code in currencies(text):
         text = re.sub(r'(?i)\b' + code + r'\b', '', text)
     text = text.strip().lstrip('$€£৳₹').strip()
+    text = re.sub(r'^([+-])\s+', r'\1', text)
     negative = text.startswith('(') and text.endswith(')')
     if negative:
         text = text[1:-1].strip()
@@ -117,11 +115,16 @@ def invoice_date(value):
 def label_pair(text):
     text = text.strip()
     # Titles are not field/value pairs. In particular, 'INVOICE' is not tax.
-    if re.fullmatch(r'(?:tax|vat|gst|sales\s+tax)\s+invoice', text, re.IGNORECASE):
+    if re.fullmatch(r'(?:tax|vat|gst|sales\s+tax)\s+invoice|invoice\s+(?:details|summary)', text, re.IGNORECASE):
         return None, ''
-    # Normalize only a tax label's rate annotation, never an observed value.
-    # 'Tax (VAT 10%)' and 'VAT (10%)' both refer to the printed tax amount.
-    text = TAX_LABEL_ANNOTATION.sub(r'\g<label>', text)
+    annotation = MONEY_LABEL_ANNOTATION.match(text)
+    if annotation and ALIASES.get(key(annotation['label'])) in MONETARY and number(annotation['note']) is None:
+        text = annotation['label'].rstrip() + text[annotation.end():]
+    pair = PARTY_LABEL_PAIR.match(text)
+    if pair:
+        name = ALIASES.get(key(pair['left']))
+        if name in {'supplier_name', 'customer_name'} and name == ALIASES.get(key(pair['right'])):
+            text = pair['left'].rstrip() + text[pair.end():]
     if ':' in text:
         label, value = text.split(':', 1)
         if key(label) in ALIASES:
@@ -262,7 +265,8 @@ def extract_invoice(source_units):
             field, value = label_pair(line)
             if field and value:
                 # A flattened row can concatenate two labels, such as Supplier and Customer.
-                if not rows or key(value) not in ALIASES or ':' in line:
+                nested_label, nested_value = label_pair(value)
+                if not rows or not (nested_label and not nested_value) or ':' in line:
                     offer(field, value, source(unit, line))
             elif field and not rows and (index == 0 or not label_pair(lines[index - 1])[0] or label_pair(lines[index - 1])[1]):
                 labels = []
@@ -303,7 +307,8 @@ def extract_invoice(source_units):
                 else:
                     values[name] = cell['text']
                 refs[name] = source(unit, cell['text'], bbox=cell['bbox'], row=row_index + 1, column=col + 1)
-            if values.get('description') and any(number(values.get(field)) is not None for field in ('quantity', 'unit_price', 'line_amount')):
+            if (any(char.isalnum() for char in values.get('description', ''))
+                    and any(number(values.get(field)) is not None for field in ('quantity', 'unit_price', 'line_amount'))):
                 item(values, refs)
                 geometry_items = True
 

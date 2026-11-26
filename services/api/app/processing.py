@@ -81,8 +81,8 @@ def normalize_dark_bands(pixels):
     width = pixels.shape[1]
     close_size = max(3, min(31, round(width * .015))) | 1
     closing = cv2.getStructuringElement(cv2.MORPH_RECT, (close_size, close_size))
-    opening = cv2.getStructuringElement(cv2.MORPH_RECT, (max(3, round(width * .025)) | 1,
-                                                       max(3, round(width * .013)) | 1))
+    minimum_height = max(3, round(width * .013)) | 1
+    opening = cv2.getStructuringElement(cv2.MORPH_RECT, (max(3, round(width * .025)) | 1, minimum_height))
     dark_pixels = cv2.inRange(pixels, 0, 100)
     mask = cv2.morphologyEx(dark_pixels, cv2.MORPH_CLOSE, closing)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening)
@@ -90,9 +90,15 @@ def normalize_dark_bands(pixels):
     mask.fill(0)
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
-        if (w >= width / 4 and w >= h * 3 and cv2.contourArea(contour) >= w * h * .85
-                and cv2.countNonZero(dark_pixels[y:y + h, x:x + w]) >= w * h * .65):
-            cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED)
+        if w < width / 4 or w < h * 3:
+            continue
+        # A nearby heading can touch the closed contour. Find the solid rows
+        # of the band in the original pixels before changing their polarity.
+        solid_rows = np.count_nonzero(dark_pixels[y:y + h, x:x + w], axis=1) >= w * .72
+        boundaries = np.flatnonzero(np.diff(solid_rows, prepend=False, append=False))
+        for top, bottom in zip(boundaries[::2], boundaries[1::2]):
+            if bottom - top >= minimum_height:
+                mask[y + top:y + bottom, x:x + w] = 255
     return np.bitwise_xor(pixels, mask, out=pixels)
 
 
@@ -188,51 +194,48 @@ def scalar(value):
     return value
 
 
+def pdf_units(path):
+    cfg = settings()
+    from .pdf_ingestion import check_deadline, inspected_pdf, page_pixels
+    import pymupdf
+
+    deadline = time.monotonic() + cfg.job_timeout
+    with inspected_pdf(path, cfg, deadline) as (pdf, normalized):
+        for index, page in enumerate(pdf):
+            check_deadline(deadline)
+            # EXCLUDE_IMAGES avoids copying image data while inspecting the text layer.
+            flags = pymupdf.TEXTFLAGS_TEXT
+            text_page = page.get_textpage(clip=page.rect, flags=flags)
+            text = text_page.extractText()
+            blocks = [{'bbox': list(b[:4]), 'text': b[4]} for b in text_page.extractBLOCKS() if b[6] == 0]
+            hidden_text = normalized and bool(text.strip()) and any(
+                span['type'] == 3 or span['opacity'] <= 0 for span in page.get_texttrace()
+            )
+            # A scan with a digital watermark or footer can have a text layer.
+            sparse_scan = 30 <= len(text.strip()) < 150 and any(
+                (pymupdf.Rect(image['bbox']) & page.rect).get_area() >= page.rect.get_area() * .55
+                for image in page.get_image_info()
+            )
+            if hidden_text:
+                blocks = []
+            if hidden_text or len(text.strip()) < 30 or sparse_scan:
+                pix = page_pixels(page, cfg.max_image_pixels, 2.2)
+                with Image.frombytes('L', [pix.width, pix.height], pix.samples) as image:
+                    del pix
+                    recognized = ocr(image)
+            else:
+                recognized = {'text': text, 'method': 'digital_pdf', 'ocr_confidence': None,
+                              'words': [{'bbox': list(word[:4]), 'text': word[4]} for word in text_page.extractWORDS()]}
+            check_deadline(deadline)
+            metadata = {'pdf_normalization': 'visible_pages_only_c2pa'} if normalized else {}
+            yield {'page': index + 1, 'total': pdf.page_count, 'blocks': blocks} | metadata | recognized
+
+
 def units(path: Path, extension: str):
     """Yield one page/sheet at a time; caller persists each unit before requesting next."""
     cfg = settings()
     if extension == '.pdf':
-        import pymupdf
-        try:
-            pdf = pymupdf.open(path, filetype='pdf')
-        except pymupdf.FileDataError as exc:
-            raise ProcessingError('Malformed or corrupt PDF') from exc
-        with pdf:
-            if not pdf.is_pdf or pdf.is_repaired:
-                raise ProcessingError('Malformed or corrupt PDF')
-            if pdf.needs_pass or pdf.page_count > cfg.max_pages or pdf.page_count == 0:
-                raise ProcessingError('Encrypted, empty, or over-limit PDF')
-            if pdf.xref_length() > 200000:
-                raise ProcessingError('PDF object limit exceeded')
-            if pdf.embfile_count():
-                raise ProcessingError('Embedded PDF files rejected. Create a new PDF from the original page images without attachments.')
-            if any(re.search(r'/JavaScript\b|/JS\b|/Launch\b|/OpenAction\b', pdf.xref_object(i)) for i in range(1, pdf.xref_length())):
-                raise ProcessingError('Active content rejected')
-            for index in range(pdf.page_count):
-                page = pdf[index]
-                text = page.get_text()
-                blocks = [{'bbox': list(b[:4]), 'text': b[4]} for b in page.get_text('blocks') if isinstance(b[4], str)]
-                # A scan with a digital watermark or footer can have a text layer.
-                sparse_scan = len(text.strip()) < 150 and any(
-                    (pymupdf.Rect(image['bbox']) & page.rect).get_area() >= page.rect.get_area() * .55
-                    for image in page.get_image_info()
-                )
-                if len(text.strip()) < 30 or sparse_scan:
-                    scale = min(2.2, (cfg.max_image_pixels / max(1, page.rect.width * page.rect.height)) ** 0.5)
-                    bounds = (page.rect * pymupdf.Matrix(scale, scale)).irect
-                    if bounds.width * bounds.height > cfg.max_image_pixels:
-                        scale *= .995 * (cfg.max_image_pixels / (bounds.width * bounds.height)) ** .5
-                    bounds = (page.rect * pymupdf.Matrix(scale, scale)).irect
-                    if bounds.width * bounds.height > cfg.max_image_pixels:
-                        raise ProcessingError('PDF page exceeds the OCR pixel limit.')
-                    pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), colorspace=pymupdf.csGRAY, alpha=False)
-                    with Image.frombytes('L', [pix.width, pix.height], pix.samples) as image:
-                        recognized = ocr(image)
-                    del pix
-                else:
-                    recognized = {'text': text, 'method': 'digital_pdf', 'ocr_confidence': None,
-                                  'words': [{'bbox': list(word[:4]), 'text': word[4]} for word in page.get_text('words')]}
-                yield {'page': index + 1, 'total': pdf.page_count, 'blocks': blocks} | recognized
+        yield from pdf_units(path)
     elif extension in {'.jpg', '.jpeg', '.png', '.tif', '.tiff'}:
         formats = {'.jpg': 'JPEG', '.jpeg': 'JPEG', '.png': 'PNG', '.tif': 'TIFF', '.tiff': 'TIFF'}
         try:

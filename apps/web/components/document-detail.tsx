@@ -139,7 +139,7 @@ export function DocumentDetail({
           target="_blank"
           rel="noreferrer"
         >
-          Open original
+          Download original
         </a>
         <button
           className="button secondary"
