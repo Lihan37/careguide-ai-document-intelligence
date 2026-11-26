@@ -234,6 +234,7 @@ def test_real_postgres_pgvector_redis_celery(real_stack):
                     assert rows[0]['document_id'] == expected, rows
                     selected = client.get('/api/documents/' + expected).json()['sources'][0]
                     source = rows[0]['source']
+                    assert source['document_id'] == expected and source['method'] == 'digital_pdf'
                     assert source['page'] == selected['page'] == 1
                     assert rows[0]['excerpt'] == selected['text'][source['start_char']:source['end_char']]
                     assert client.get('/api/search', params={'q': query}).json()['total'] == 0
@@ -308,5 +309,9 @@ def test_real_postgres_pgvector_redis_celery(real_stack):
             assert client.get('/api/documents/' + network).status_code == 404
             rows = client.post('/api/search/semantic', json={'query': 'internet service subscription', 'limit': 50}).json()['items']
             assert rows and all(row['document_id'] != network for row in rows)
+            assert all(row['source']['document_id'] == row['document_id'] for row in rows)
+            with httpx.Client(base_url=f'http://127.0.0.1:{port}', headers=headers, timeout=10, trust_env=False) as guest:
+                forbidden = guest.post('/api/search/semantic', json={'query': 'internet service subscription'})
+                assert forbidden.status_code == 401
 
     (logs / 'results.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')

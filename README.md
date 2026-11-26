@@ -105,6 +105,8 @@ The default quick start uses SQLite and a separate local worker process. For the
 
 ### Local semantic search
 
+To enable semantic search on the normal localhost frontend while keeping an existing SQLite workspace, use the [dedicated PostgreSQL development profile](docs/setup-windows.md#semantic-search-for-an-existing-local-workspace). It verifies a backup, copies the workspace into a separate loopback database and indexes saved source text before the API switch.
+
 Install the current Python lockfile and fetch the free English BGE model once from the repository root:
 
 ```powershell

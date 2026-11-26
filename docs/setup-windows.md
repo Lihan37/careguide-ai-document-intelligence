@@ -27,6 +27,45 @@ npm.cmd run dev --prefix apps/web
 
 Open **http://localhost:3000**. Use `localhost` consistently; browsing frontend at `127.0.0.1` while API is configured for `localhost` can break host-scoped cookies/CORS. The local API creates the configured user on first startup, after migrations. Changing DEMO_PASSWORD later does not reset an existing user; use `scripts/reset-password.py` explicitly. Local processing starts its own separate process; no worker terminal or Redis is needed. SQLite is persistent under `data/`, and semantic search remains disabled.
 
+## Semantic search for an existing local workspace
+
+Start Docker Desktop and prepare the FastEmbed model cache using the [model setup in the README](../README.md#local-semantic-search). From the project root, initialize the dedicated PostgreSQL 17 profile. It uses a named Docker volume on `127.0.0.1:55432` and generates its own password under ignored `data/semantic-dev/`. The original `.env`, SQLite database and upload directory remain in place.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 Initialize
+```
+
+Initialization verifies SQLite integrity and upload checksums before applying migrations to the new database. It then checks copied rows, IDs, ownership and foreign keys, and indexes the saved page and worksheet text locally. It keeps the verified backup and reports in `data/semantic-dev/backup` and `data/semantic-dev/migration-report.json`. Finish any outstanding processing first. If the original workspace changes during the initial copy, keep SQLite active until the snapshot and copy can be reconciled.
+
+You can preview the PostgreSQL API on port 8001 while the SQLite API remains on 8000. Close the preview with Ctrl+C when finished.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 Start -Port 8001
+```
+
+To switch the normal localhost frontend to the verified copy, stop the idle API and check that the SQLite records and uploads still match the verified backup. Start the PostgreSQL-backed API on port 8000. The same command starts PostgreSQL if needed. The existing local document processing mode handles new jobs, so Redis is optional for this profile.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 StopApi
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 VerifySource
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 Start
+```
+
+In another terminal, run `npm.cmd run dev --prefix apps/web` if the frontend is stopped. Open **http://localhost:3000/search**. Keyword search runs independently. Semantic search uses FastEmbed’s English BGE model and exact cosine ranking over owner-filtered 384-dimensional pgvector rows. The database has lookup indexes for owner and embedding model/document. Results link to the stored PDF page or worksheet. [FastEmbed supported models](https://qdrant.github.io/fastembed/examples/Supported_Models/) · [pgvector filtering](https://github.com/pgvector/pgvector#filtering)
+
+### Return to SQLite
+
+Stop the current API and start the original profile. In a separate terminal, you can stop the PostgreSQL container while retaining its volume and private upload directory.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 StopApi
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 StartSQLite
+# Optional, in another PowerShell terminal
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\semantic-local.ps1 StopPostgres
+```
+
+Each profile keeps its own edits after the copy. Edits made while PostgreSQL is active remain in that profile when you return to SQLite. Use `Start` again to return to PostgreSQL and its later edits.
+
 ## OCR
 
 The following PowerShell commands install the verified 64-bit Windows build, Tesseract 5.5.4 from conda-forge, inside ignored project data. Run from the project root in a normal PowerShell terminal. The setup uses the upstream micromamba download, a project-local package cache, and about 217 MB of package downloads. It requires no administrator access. [Micromamba Windows instructions](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html#windows) · [conda-forge Tesseract](https://anaconda.org/channels/conda-forge/packages/tesseract)
