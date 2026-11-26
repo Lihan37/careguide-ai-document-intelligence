@@ -72,7 +72,7 @@ def test_sdk_contract_fixture_accuracy_and_evidence(name, monkeypatch):
         assert 'untrusted document' in body['systemInstruction']['parts'][0]['text']
         payload = json.loads(body['contents'][0]['parts'][0]['text'])
         assert payload['untrusted_document'] == sources[len(requests)]['text']
-        assert set(payload['labeled_header_context']) <= {'supplier_name', 'customer_name', 'invoice_date', 'currency'}
+        assert set(payload['labeled_header_context']) <= {'supplier_name', 'customer_name', 'invoice_date', 'currency', 'invoice_number'}
         requests.append(request)
         return response(next(replies))
 
@@ -183,6 +183,91 @@ def test_gemini_dates_use_issue_label_and_normalize_written_formats(printed):
     assert invoice.invoice_date.isoformat() == '2094-08-27'
     assert evidence['invoice_date']['excerpt'] == f'Invoice Date: {printed}'
     assert not issues
+
+
+@pytest.mark.parametrize('layout,date_label,date_text,supplier_label,customer_label', [
+    ('columns', 'Document Date', '16 Feb 2033', 'SENT BY', 'CHARGE TO'),
+    ('inline', 'Invoice Date', '2033-02-16', 'Supplier', 'Billed To'),
+    ('stacked', 'Date Issued', '16 Feb. 2033', 'Supplier', 'Customer'),
+])
+def test_gemini_grounds_header_fields_from_real_scans(tmp_path, layout, date_label, date_text, supplier_label, customer_label):
+    if not ocr_available():
+        pytest.skip('Real Tesseract is required for scanned source evidence')
+    path = tmp_path / 'synthetic-scan.pdf'
+    supplier, customer = 'Example Ridge Services LLC', 'Fictional Coast Studio'
+    with pymupdf.open() as drawing, pymupdf.open() as scanned:
+        page = drawing.new_page(width=600, height=560)
+        if layout == 'columns':
+            # Reverse the columns and use smaller labels with extra vertical space.
+            page.insert_text((44, 140), customer_label, fontsize=10)
+            page.insert_text((318, 140), supplier_label, fontsize=10)
+            page.insert_text((44, 178), customer, fontsize=17)
+            page.insert_text((318, 178), supplier, fontsize=17)
+        elif layout == 'inline':
+            page.insert_text((44, 140), f'{supplier_label}: {supplier}', fontsize=14)
+            page.insert_text((44, 176), f'{customer_label}: {customer}', fontsize=14)
+        else:
+            page.insert_text((44, 140), supplier_label, fontsize=13)
+            page.insert_text((44, 165), supplier, fontsize=15)
+            page.insert_text((44, 215), customer_label, fontsize=13)
+            page.insert_text((44, 240), customer, fontsize=15)
+        page.insert_text((44, 77), f'{date_label}: {date_text}', fontsize=14)
+        page.insert_text((44, 106), 'Billing reference: SCAN-413', fontsize=14)
+        page.insert_text((44, 310), 'Currency: CAD\nTotal: CAD 320.00', fontsize=14)
+        page.insert_text((44, 403), 'Payment deadline: 22 Feb 2033', fontsize=14)
+        image = page.get_pixmap(matrix=pymupdf.Matrix(3, 3), alpha=False)
+        scan_page = scanned.new_page(width=600, height=560)
+        scan_page.insert_image(scan_page.rect, pixmap=image)
+        assert not scan_page.get_text().strip()
+        scanned.save(path, deflate=True)
+
+    unit, = units(path, '.pdf')
+    assert unit['method'] == 'tesseract_ocr' and unit['ocr_seconds'] > 0
+
+    def respond(request):
+        body = json.loads(request.content)
+        context = json.loads(body['contents'][0]['parts'][0]['text'])['labeled_header_context']
+        assert supplier in context['supplier_name'] and customer in context['customer_name']
+        return response({'supplier_name': customer, 'customer_name': supplier, 'invoice_date': '22 Feb 2033', 'total': '320.00'})
+
+    invoice, evidence, issues, _, _ = mock_extract([unit], respond)
+    assert (invoice.supplier_name, invoice.customer_name) == (supplier, customer)
+    assert invoice.invoice_date.isoformat() == '2033-02-16'
+    assert invoice.invoice_number == 'SCAN-413'
+    assert invoice.total == Decimal('320.00') and invoice.currency == 'CAD'
+    assert not issues
+    for field in ('invoice_date', 'supplier_name', 'customer_name', 'invoice_number'):
+        proof = evidence[field]
+        assert proof['page'] == 1 and proof['method'] == 'tesseract_ocr'
+        assert proof['coordinate_space'] == 'preprocessed_image_pixels'
+        assert proof['ocr_confidence'] == unit['ocr_confidence'] > 0
+        assert proof['label_bbox'] and proof['bbox']
+    if layout == 'columns':
+        proof = evidence['supplier_name']
+        assert proof['bbox'][1] - proof['label_bbox'][1] > max(45, 3 * (proof['label_bbox'][3] - proof['label_bbox'][1]))
+
+
+def test_unlabeled_ocr_text_does_not_verify_parties_or_due_date():
+    unit = source('Sent by courier\nCharge to reference 40\nExample Services\nPayment deadline: 22 Feb 2033\nPayment reference: PAY-23') | {
+        'method': 'tesseract_ocr', 'ocr_confidence': 0.93,
+    }
+    invoice, _, issues, _, _ = mock_extract([unit], lambda _: response({
+        'supplier_name': 'Example Services', 'customer_name': 'Example Services', 'invoice_date': '22 Feb 2033',
+    }))
+    assert invoice.supplier_name is invoice.customer_name is invoice.invoice_date is None
+    assert invoice.invoice_number is None
+    assert {i['rule_id'] for i in issues} == {
+        'gemini_unverified_supplier_name', 'gemini_unverified_customer_name', 'gemini_unverified_invoice_date',
+    }
+
+
+def test_conflicting_invoice_references_are_not_used_as_fallback():
+    invoice, evidence, _, _, _ = mock_extract(
+        [source('Billing Reference: BL-143'), source('Invoice Reference: REF-254', page=2)],
+        lambda _: response({}),
+    )
+    assert invoice.invoice_number is None
+    assert 'invoice_number' not in evidence
 
 
 @pytest.mark.parametrize('layout,date_label,printed_date,currency_label,declaration,code', [

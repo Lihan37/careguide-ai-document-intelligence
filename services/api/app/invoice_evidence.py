@@ -3,13 +3,14 @@ import re
 
 from openpyxl.utils.cell import get_column_letter
 
-from .invoice_parser import (CODES, CURRENCY_SYMBOL, ISO_AMOUNT, MONETARY, PARTY_FIELDS, QUALIFIED_CURRENCY,
+from .invoice_parser import (CODES, CURRENCY_SYMBOL, EXPLICIT_INVOICE_REFERENCE, ISO_AMOUNT, MONETARY, PARTY_FIELDS, QUALIFIED_CURRENCY,
                              declared_currencies, header_currency, label_pair, normalized, number, table_header,
                              visual_rows)
 
 
-SOURCE_KEYS = ('document_id', 'page', 'sheet', 'method', 'ocr_confidence')
+SOURCE_KEYS = ('document_id', 'page', 'sheet', 'method', 'coordinate_space', 'ocr_confidence')
 VERIFIED_FIELDS = PARTY_FIELDS | {'invoice_date', 'currency'}
+EVIDENCE_FIELDS = VERIFIED_FIELDS | MONETARY | {'invoice_number'}
 AMBIGUOUS_SYMBOL = re.compile(r'[$£¥]')
 
 
@@ -18,6 +19,8 @@ def field_value(field, text):
         # Keep the association even if the declaration is conflicting. The
         # reconciliation step needs both codes with their source reference.
         return text if declared_currencies(text) or AMBIGUOUS_SYMBOL.fullmatch(text.strip()) else None
+    if field == 'invoice_number' and len(text) > 255:
+        return None
     if field in PARTY_FIELDS:
         if (len(text) > 255 or label_pair(text)[0] or not any(char.isalpha() for char in text)
                 or re.search(r'@|https?://|^\d+\s|^(?:address|phone|account|email|contact)\b', text, re.IGNORECASE)):
@@ -34,7 +37,7 @@ def rows_with_locations(unit):
     return [row['cells'] for row in visual_rows(unit)]
 
 
-def neighboring_value(rows, row, column, label, field):
+def neighboring_value(rows, row, column, label, field, *, ocr):
     right = rows[row][column + 1:column + 2]
     if 'bbox' in label:
         x0, y0, x1, y1 = label['bbox']
@@ -44,8 +47,16 @@ def neighboring_value(rows, row, column, label, field):
         tolerance = max(22, 1.5 * height) if field in PARTY_FIELDS else max(12, 1.3 * height)
         other_party_columns = [cell['bbox'][0] for cell in rows[row] if cell is not label
                                and field in PARTY_FIELDS and label_pair(cell['text'])[0] in PARTY_FIELDS]
-        next_rows = ([cell for cell in cells if abs(cell['bbox'][0] - x0) <= tolerance
-                      and 0 < cell['bbox'][1] - y0 <= max(45, 3 * height)]
+        def aligned_below(cell):
+            left, top, _, bottom = cell['bbox']
+            max_gap_below = max(45, 3 * height)
+            if ocr and (field in PARTY_FIELDS or field == 'invoice_date'):
+                # OCR boxes hug the ink. A small heading over a larger value
+                # needs a gap that accounts for the height of both text rows.
+                max_gap_below = max(max_gap_below, height + 2 * max(height, bottom - top))
+            return abs(left - x0) <= tolerance and 0 < top - y0 <= max_gap_below
+
+        next_rows = ([cell for cell in cells if aligned_below(cell)]
                      for cells in rows[row + 1:row + 4])
     else:
         other_party_columns = []
@@ -63,10 +74,18 @@ def neighboring_value(rows, row, column, label, field):
 
 
 def labeled_values(unit, rows):
+    ocr = unit.get('method') == 'tesseract_ocr'
+
+    def evidence_label(text):
+        field, inline = label_pair(text)
+        if field == 'invoice_number' and not EXPLICIT_INVOICE_REFERENCE.match(text):
+            return None, ''
+        return field, inline
+
     for row, cells in enumerate(rows):
         for column, label in enumerate(cells):
-            field, inline = label_pair(label['text'])
-            if field not in VERIFIED_FIELDS | MONETARY:
+            field, inline = evidence_label(label['text'])
+            if field not in EVIDENCE_FIELDS:
                 continue
             if inline:
                 yield field, inline, label, label
@@ -75,15 +94,15 @@ def labeled_values(unit, rows):
                 yield field, right[0]['text'] + ' ' + right[1]['text'], label, right[0] | {
                     'text': right[0]['text'] + ' ' + right[1]['text'],
                 }
-            elif value := neighboring_value(rows, row, column, label, field):
+            elif value := neighboring_value(rows, row, column, label, field, ocr=ocr):
                 yield field, value['text'], label, value
     if rows:
         return
     # A plain-text run of several headings has no reliable column alignment.
     lines = [line.strip() for line in unit['text'].splitlines() if line.strip()]
     for index, line in enumerate(lines):
-        field, inline = label_pair(line)
-        if field not in VERIFIED_FIELDS | MONETARY:
+        field, inline = evidence_label(line)
+        if field not in EVIDENCE_FIELDS:
             continue
         label = {'text': line}
         if inline:

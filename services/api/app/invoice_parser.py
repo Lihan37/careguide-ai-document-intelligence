@@ -14,19 +14,19 @@ def key(value):
     return re.sub(r'[^a-z0-9]', '', str(value).casefold())
 
 
+INVOICE_REFERENCE_LABELS = ('invoice number', 'invoice no', 'invoice #', 'invoice id', 'invoice reference', 'billing reference')
 LABELS = {
-    'invoice number': 'invoice_number', 'invoice no': 'invoice_number',
-    'invoice #': 'invoice_number', 'invoice id': 'invoice_number',
+    **dict.fromkeys(INVOICE_REFERENCE_LABELS, 'invoice_number'),
     'invoice': 'invoice_number', 'invoice date': 'invoice_date',
     'issue date': 'invoice_date', 'date issued': 'invoice_date', 'date of issue': 'invoice_date',
-    'issued on': 'invoice_date', 'dated': 'invoice_date', 'date': 'invoice_date',
+    'issued on': 'invoice_date', 'dated': 'invoice_date', 'document date': 'invoice_date', 'date': 'invoice_date',
     'supplier name': 'supplier_name', 'supplier': 'supplier_name',
     'bill from': 'supplier_name', 'billed from': 'supplier_name', 'issued by': 'supplier_name',
-    'sender': 'supplier_name', 'from': 'supplier_name',
+    'sender': 'supplier_name', 'from': 'supplier_name', 'sent by': 'supplier_name',
     'vendor': 'supplier_name', 'sold by': 'supplier_name', 'seller': 'supplier_name', 'seller name': 'supplier_name',
     'customer name': 'customer_name', 'customer': 'customer_name',
     'bill to': 'customer_name', 'billed to': 'customer_name', 'sold to': 'customer_name',
-    'recipient': 'customer_name',
+    'recipient': 'customer_name', 'charge to': 'customer_name',
     'buyer': 'customer_name', 'buyer name': 'customer_name',
     'sub total': 'subtotal', 'subtotal': 'subtotal',
     'vat': 'tax', 'tax': 'tax', 'tax amount': 'tax', 'vat amount': 'tax',
@@ -71,6 +71,10 @@ TABLE_LABELS = {
 }
 
 MONEY_LABEL_ANNOTATION = re.compile(r'^(?P<label>[a-z][a-z_ &]*?)\s*\((?P<note>[^()]{1,100})\)(?=\s|:|$)', re.IGNORECASE)
+EXPLICIT_INVOICE_REFERENCE = re.compile(
+    r'^\s*(?:' + '|'.join(r'[\s_]+'.join(map(re.escape, label.split())) for label in INVOICE_REFERENCE_LABELS)
+    + r')(?:\.(?=[:\s]|$)|(?=[:\s]|$))', re.IGNORECASE,
+)
 PARTY_ALIASES = re.compile(
     r'^\s*(' + '|'.join(r'[\s_]+'.join(map(re.escape, label.split())) for label in sorted(LABELS, key=len, reverse=True)
                         if LABELS[label] in PARTY_FIELDS) + r')(?=\s|:|$)',
@@ -158,7 +162,7 @@ def invoice_date(value):
         if a <= 12 and b <= 12 and a != b:
             return None  # No silent locale assumption for ambiguous dates.
         text = f'{year}-{b if a > 12 else a:02d}-{a if a > 12 else b:02d}'
-    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%d %b, %Y', '%d %B, %Y',
+    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%d %b, %Y', '%d %B, %Y', '%d %b. %Y', '%d %b., %Y',
                 '%d-%b-%Y', '%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y'):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
@@ -197,7 +201,7 @@ def label_pair(text):
         # A bare INVOICE title is not an invoice-number field.
         return (None, '') if key(text) == 'invoice' else (ALIASES[key(text)], '')
     for label in sorted(LABELS, key=len, reverse=True):
-        if label in {'from', 'sender', 'recipient'}:
+        if label in {'from', 'sender', 'recipient', 'sent by', 'charge to'}:
             continue  # These words also occur in prose. Require a heading or explicit delimiter.
         pattern = r'^[ \t]*' + r'[\s_]+'.join(re.escape(part) for part in label.split()) + r'\.?\s*(?:[:#]\s*|\s+)(.+)$'
         match = re.match(pattern, text, re.IGNORECASE)
