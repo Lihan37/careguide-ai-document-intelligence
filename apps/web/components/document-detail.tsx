@@ -455,6 +455,14 @@ export function DocumentDetail({
                 {source.page ? `Page ${source.page}` : source.sheet} ·{" "}
                 {source.method}
               </h3>
+              {source.ocr_language && (
+                <p>
+                  OCR language {source.ocr_language} · mean word confidence{" "}
+                  {source.ocr_confidence == null
+                    ? "unavailable"
+                    : `${Math.round(source.ocr_confidence * 100)}%`}
+                </p>
+              )}
               <pre className="source-text">{source.text}</pre>
               {source.rows && (
                 <details>

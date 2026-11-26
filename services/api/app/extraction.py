@@ -39,7 +39,7 @@ def extract(source_units):
                 usage['output_tokens'] += response.usage.output_tokens
             for name, value in results[-1].items():
                 if value is not None and name != 'line_items':
-                    evidence.setdefault(name, {k: unit[k] for k in ('document_id', 'page', 'sheet', 'method') if k in unit} | {'excerpt': chunk[:1000], 'confidence': None, 'confidence_basis': 'model output; uncalibrated, evidence excerpt requires review'})
+                    evidence.setdefault(name, {k: unit[k] for k in ('document_id', 'page', 'sheet', 'method', 'ocr_confidence') if k in unit} | {'excerpt': chunk[:1000], 'confidence': None, 'confidence_basis': 'model output; uncalibrated, evidence excerpt requires review'})
     merged, conflicts = {}, []
     for name in Invoice.model_fields:
         values = [r[name] for r in results if r.get(name) is not None and r.get(name) != []]

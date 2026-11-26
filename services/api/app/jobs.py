@@ -4,7 +4,7 @@ from concurrent.futures import ProcessPoolExecutor
 from sqlalchemy import select, update, delete
 from .db import Session, Document, Job, SourceUnit, Embedding, now
 from .config import settings
-from .processing import units
+from .processing import ProcessingError, units
 from .extraction import extract
 from .validation import validate, duplicates
 
@@ -78,6 +78,14 @@ def run_job(job_id):
             document.invoice_number = invoice.invoice_number
             document.supplier = invoice.supplier_name
             issues += validate(invoice)
+            for unit in source:
+                if unit['method'] != 'tesseract_ocr':
+                    continue
+                confidence = unit['ocr_confidence']
+                if confidence is None or confidence < settings().ocr_review_threshold:
+                    issues.append({'rule_id': 'ocr_review', 'severity': 'WARNING', 'page': unit['page'],
+                                   'explanation': f'Check OCR text against the original on page {unit["page"]}.',
+                                   'actual': confidence, 'expected': settings().ocr_review_threshold})
             others = db.scalars(select(Document).where(Document.owner_id == document.owner_id)).all()
             issues += duplicates(document, others, effective)
             document.issues = issues
@@ -105,7 +113,8 @@ def run_job(job_id):
             document, job = db.get(Document, document.id), db.get(Job, job_id)
             # Never persist exception payloads that can include document data or provider secrets.
             safe_types = (ValueError, TimeoutError)
-            message = str(exc)[:300] if isinstance(exc, safe_types) and not settings().llm_api_key else type(exc).__name__ + ': processing failed; inspect configuration or retry'
+            safe_message = isinstance(exc, ProcessingError) or (isinstance(exc, safe_types) and not settings().llm_api_key)
+            message = str(exc)[:300] if safe_message else type(exc).__name__ + ': processing failed; inspect configuration or retry'
             document.error = job.error = message
             document.status = job.status = 'FAILED'
             job.stage = 'Failed'

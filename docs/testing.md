@@ -1,6 +1,6 @@
 # Tests, environment isolation and safe inspection
 
-The verified environment is Windows, Python 3.13 and Node 22.17. Current verification after the isolation change: **185 backend tests passed, 4 real OCR cases explicitly skipped; 4 isolated browser workflows passed**. TypeScript standalone and Next.js production build passed. OCR skips are caused by the missing Tesseract executable; the existing Starlette/TestClient httpx deprecation warning remains visible.
+The OCR verification environment used Windows, Python 3.13, Node 22.17 and Tesseract 5.5.4 with English traineddata. **201 backend tests and 5 isolated browser workflows passed**, with zero failures and zero skips. The four previously skipped OCR tests ran against the native executable. The existing Starlette/TestClient httpx deprecation warning remains visible.
 
 ## Safe commands
 
@@ -15,6 +15,8 @@ npm.cmd run build --prefix apps/web
 ```
 
 Install Chromium once with `npx.cmd --prefix apps/web playwright install chromium`. The browser runner starts its own servers; do **not** point tests at the normal app or supply development credentials. Direct `npx playwright test` without an isolated runner context fails intentionally. No external AI account is required.
+
+To include real OCR, export `TESSERACT_CMD`, `TESSERACT_DATA_DIR` and `OCR_LANGUAGE=eng` in the same PowerShell session. The [Windows installation instructions](setup-windows.md#ocr) include the exact commands for the verified project-local installation. Pytest, Playwright and evaluation inherit these variables without reading development credentials. Run `python scripts/benchmark_ocr.py` using the project virtual environment for timings and a private JSON report under `data/evaluation/`. The benchmark reads the committed synthetic fixtures without connecting to a database.
 
 | Purpose | Environment and locations |
 | --- | --- |
@@ -31,11 +33,11 @@ Playwright servers shut down cooperatively before temporary directories are remo
 
 ## Coverage and actual evidence
 
-The full backend run passed 185 cases with zero failures and four OCR skips. **41 environment-isolation cases** are included: unsafe/missing configuration, explicit development mode, traversal/storage overlap, ownership markers, hardlinks, PostgreSQL naming, direct Playwright invocation, normal-app URL rejection, upload provenance, cross-environment requests, no startup document seeding, read-only inventory, conservative cleanup, migration reset protection and broker namespaces.
+The backend suite includes **41 environment-isolation cases** for unsafe or missing configuration, database and storage paths, ownership markers, hardlinks, PostgreSQL naming, wrong-server requests, audit provenance, read-only inspection, cleanup, migration reset protection and broker namespaces.
 
-Existing coverage remains for PDF/OCR/spreadsheets/CSV, malformed files, schema and Decimal arithmetic, duplicates, comparison, corrections/audits, review gates, search, authorization, retry/cancellation/recovery and both reported invoice layouts. The four browser workflows use real upload/processing results: compound VAT and first-layout invoices, correction/search/comparison, valid/duplicate documents, corrupt-file retry and connected navigation. Their recorded isolated run passed four cases in 43.2 seconds; no development records were inserted.
+The backend OCR suite covers JPG, PNG, multi-frame TIFF, image-only PDFs, multipage scans, and a mixed PDF with a text layer on its first page and a digital footer on its scanned second page. It checks original OCR text, source page evidence, Decimal arithmetic, blank scans, corrupt images, unsupported formats, a retry after restoring language configuration and manual correction with the original OCR warning retained. The fifth browser workflow uploads a multipage scan and checks the structured total, second-page evidence and passing validation through the isolated API and background worker. Existing browser workflows cover digital invoices, correction, review, search, comparison, duplicate warnings and failed-job retries.
 
-The isolated evaluation run migrated its own database and persisted 14 document/job records. It processed 8/14 fixtures successfully; five OCR-dependent fixtures and the deliberately corrupt PDF failed visibly. Header accuracy on successful fixtures was 64/64. These are deterministic synthetic-fixture measurements, not live AI accuracy. The run's report includes pipeline/persistence time, so it should not be compared directly with the earlier reader-only timing.
+The latest isolated evaluation processed 13 of 14 fixtures, with the deliberately corrupt PDF as the only failure. It matched 104 of 104 scored header values across successfully processed fixtures. The separate OCR benchmark processed seven of eight scan fixtures and measured nine OCR pages. See the [OCR evaluation results](evaluation-report.md#real-ocr-verification).
 
 Read-only snapshots taken before/after backend, browser and evaluation checks showed identical hashes for all **eight development tables and all 23 uploaded original files**. Both manually uploaded test invoices and the uploaded CV remained present. Full inventory and preservation evidence are private under `data/inspection/`; they are not committed because they describe the user's local records.
 

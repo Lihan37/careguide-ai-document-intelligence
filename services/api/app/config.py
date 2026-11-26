@@ -5,7 +5,7 @@ import sys
 import uuid
 import json
 from typing import Literal
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -34,12 +34,15 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     embeddings_enabled: bool = False
     tesseract_cmd: str = ''
+    tesseract_data_dir: str = ''
+    ocr_language: str = Field(default='eng', pattern=r'^[a-zA-Z0-9_/-]+(?:\+[a-zA-Z0-9_/-]+)*$')
+    ocr_review_threshold: float = Field(default=0.80, ge=0, le=1)
     max_file_mb: int = 30
     max_upload_files: int = 10
     max_pages: int = 1200
     max_cells: int = 200000
     max_image_pixels: int = 25000000
-    ocr_timeout: int = 30
+    ocr_timeout: int = Field(default=30, gt=0)
     job_timeout: int = 3600
     currency_tolerances: dict[str, str] = {'JPY': '1', 'KRW': '1', 'KWD': '0.001', 'BHD': '0.001'}
     cors_origin: str = 'http://localhost:3000'

@@ -1,13 +1,17 @@
 """Bounded, provenance-preserving readers. No document code or macros are executed."""
 import csv
 import io
+import os
 import re
 import shutil
+import subprocess
+import time
+from functools import lru_cache
 import zipfile
 from pathlib import Path
 from datetime import date, datetime
 from charset_normalizer import from_bytes
-from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+from PIL import Image, ImageOps, ImageEnhance, ImageFilter, UnidentifiedImageError
 from .config import settings
 
 EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.xlsx', '.xls', '.csv'}
@@ -42,9 +46,31 @@ def signature(path: Path, extension: str):
             raise ProcessingError('Corrupt workbook archive') from exc
 
 
+@lru_cache(maxsize=16)
+def installed_ocr_languages(command, data_dir):
+    args = [command, '--list-langs']
+    if data_dir:
+        args += ['--tessdata-dir', data_dir]
+    try:
+        result = subprocess.run(args, capture_output=True, encoding='utf-8', errors='replace', timeout=5,
+                                check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        return frozenset(line.strip() for line in result.stdout.splitlines()[1:])
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+
+
+def ocr_configuration():
+    cfg = settings()
+    command = shutil.which(cfg.tesseract_cmd or 'tesseract')
+    if command is None and cfg.tesseract_cmd and Path(cfg.tesseract_cmd).is_file():
+        command = str(Path(cfg.tesseract_cmd).resolve())
+    data_dir = str(Path(cfg.tesseract_data_dir).resolve()) if cfg.tesseract_data_dir else ''
+    return command, data_dir, installed_ocr_languages(command, data_dir) if command else frozenset()
+
+
 def ocr_available():
-    command = settings().tesseract_cmd or 'tesseract'
-    return bool(shutil.which(command) or Path(command).is_file())
+    command, _, languages = ocr_configuration()
+    return bool(command and set(settings().ocr_language.split('+')) <= languages)
 
 
 def preprocess(image):
@@ -66,31 +92,69 @@ def preprocess(image):
 
 
 def ocr(image):
+    cfg = settings()
     if not ocr_available():
-        raise ProcessingError('Tesseract OCR is unavailable. Install it and configure TESSERACT_CMD.')
-    import pytesseract
-    if settings().tesseract_cmd:
-        pytesseract.pytesseract.tesseract_cmd = settings().tesseract_cmd
-    image = preprocess(image)
-    try:
+        raise ProcessingError('Tesseract OCR or the configured language is unavailable. Check TESSERACT_CMD, TESSERACT_DATA_DIR and OCR_LANGUAGE.')
+    command, data_dir, languages = ocr_configuration()
+    if command is None:
+        raise ProcessingError('Tesseract OCR is unavailable.')
+    tessdata = ['--tessdata-dir', data_dir] if data_dir else []
+    # Use the CLI argument vector directly: pytesseract's config-string parser
+    # can pass literal quotes around a Windows tessdata path.
+    environment = os.environ.copy()
+    environment.setdefault('OMP_THREAD_LIMIT', '1')
+
+    def recognize(pixels, args, timeout):
+        with io.BytesIO() as encoded:
+            pixels.save(encoded, format='PNG', dpi=(300, 300))
+            return subprocess.run(
+                [command, 'stdin', 'stdout', *tessdata, *args], input=encoded.getvalue(),
+                capture_output=True, check=True, timeout=timeout, env=environment,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            ).stdout.decode('utf-8', errors='replace')
+
+    started = time.perf_counter()
+    with preprocess(image) as processed:
+        rotation = 0
+        if 'osd' in languages:
+            try:
+                orientation = recognize(processed, ['--psm', '0', '-l', 'osd'], min(5, cfg.ocr_timeout / 3))
+                match = re.search(r'^Rotate: (90|180|270)\r?$', orientation, re.MULTILINE)
+                rotation = int(match[1]) if match else 0
+            except (OSError, subprocess.SubprocessError):
+                pass  # A sparse text page may not have enough points for orientation detection.
+        oriented = processed.rotate(-rotation, expand=True, fillcolor=255) if rotation else processed
         try:
-            rotation = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT, timeout=min(10, settings().ocr_timeout))['rotate']
-            if rotation:
-                image = image.rotate(-rotation, expand=True, fillcolor=255)
-        except (pytesseract.TesseractError, RuntimeError):
-            pass
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT, timeout=settings().ocr_timeout, config='--psm 6')
-        lines, confidences = {}, []
-        for i, word in enumerate(data['text']):
-            if not word.strip():
-                continue
-            key = (data['block_num'][i], data['par_num'][i], data['line_num'][i])
-            lines.setdefault(key, []).append(word)
-            if float(data['conf'][i]) >= 0:
-                confidences.append(float(data['conf'][i]))
-        return '\n'.join(' '.join(line) for line in lines.values()), (sum(confidences) / len(confidences) / 100 if confidences else None)
-    finally:
-        image.close()
+            remaining = cfg.ocr_timeout - (time.perf_counter() - started)
+            if remaining <= 0:
+                raise ProcessingError('OCR exceeded the page time limit.')
+            data = recognize(oriented, ['--psm', '6', '-l', cfg.ocr_language, '-c', 'tessedit_create_tsv=1'], remaining)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise ProcessingError('Tesseract could not recognize this page.') from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ProcessingError('OCR exceeded the page time limit.') from exc
+        finally:
+            if oriented is not processed:
+                oriented.close()
+    lines, confidences, words = {}, [], []
+    rows = csv.DictReader(io.StringIO(data), delimiter='\t', quoting=csv.QUOTE_NONE)
+    if not {'text', 'block_num', 'par_num', 'line_num', 'conf', 'left', 'top', 'width', 'height'} <= set(rows.fieldnames or []):
+        raise ProcessingError('Tesseract did not return word evidence for this page.')
+    for row in rows:
+        word = row['text'] or ''
+        if not word.strip():
+            continue
+        key = (row['block_num'], row['par_num'], row['line_num'])
+        lines.setdefault(key, []).append(word)
+        confidence = float(row['conf'])
+        if confidence >= 0:
+            confidences.append(confidence)
+        x, y, width, height = (int(row[k]) for k in ('left', 'top', 'width', 'height'))
+        words.append({'text': word, 'bbox': [x, y, x + width, y + height]})
+    return {'text': '\n'.join(' '.join(line) for line in lines.values()), 'words': words,
+            'method': 'tesseract_ocr', 'ocr_confidence': sum(confidences) / len(confidences) / 100 if confidences else None,
+            'ocr_language': cfg.ocr_language, 'ocr_seconds': round(time.perf_counter() - started, 6),
+            'coordinate_space': 'preprocessed_image_pixels'}
 
 
 def scalar(value):
@@ -117,28 +181,41 @@ def units(path: Path, extension: str):
                 page = pdf[index]
                 text = page.get_text()
                 blocks = [{'bbox': list(b[:4]), 'text': b[4]} for b in page.get_text('blocks') if isinstance(b[4], str)]
-                method, confidence = 'digital_pdf', None
-                if len(text.strip()) < 30:
+                # A scan with a digital watermark or footer can have a text layer.
+                sparse_scan = len(text.strip()) < 150 and any(
+                    (pymupdf.Rect(image['bbox']) & page.rect).get_area() >= page.rect.get_area() * .55
+                    for image in page.get_image_info()
+                )
+                if len(text.strip()) < 30 or sparse_scan:
                     scale = min(2.0, (cfg.max_image_pixels / max(1, page.rect.width * page.rect.height)) ** 0.5)
-                    pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
-                    with Image.frombytes('RGB', [pix.width, pix.height], pix.samples) as image:
-                        text, confidence = ocr(image)
+                    bounds = (page.rect * pymupdf.Matrix(scale, scale)).irect
+                    if bounds.width * bounds.height > cfg.max_image_pixels:
+                        scale *= .995 * (cfg.max_image_pixels / (bounds.width * bounds.height)) ** .5
+                    bounds = (page.rect * pymupdf.Matrix(scale, scale)).irect
+                    if bounds.width * bounds.height > cfg.max_image_pixels:
+                        raise ProcessingError('PDF page exceeds the OCR pixel limit.')
+                    pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), colorspace=pymupdf.csGRAY, alpha=False)
+                    with Image.frombytes('L', [pix.width, pix.height], pix.samples) as image:
+                        recognized = ocr(image)
                     del pix
-                    method = 'tesseract_ocr'
-                words = [{'bbox': list(word[:4]), 'text': word[4]} for word in page.get_text('words')] if method == 'digital_pdf' else []
-                yield {'page': index + 1, 'total': pdf.page_count, 'text': text, 'blocks': blocks, 'words': words, 'method': method, 'ocr_confidence': confidence}
+                else:
+                    recognized = {'text': text, 'method': 'digital_pdf', 'ocr_confidence': None,
+                                  'words': [{'bbox': list(word[:4]), 'text': word[4]} for word in page.get_text('words')]}
+                yield {'page': index + 1, 'total': pdf.page_count, 'blocks': blocks} | recognized
     elif extension in {'.jpg', '.jpeg', '.png', '.tif', '.tiff'}:
-        Image.MAX_IMAGE_PIXELS = cfg.max_image_pixels
-        with Image.open(path) as image:
-            frames = getattr(image, 'n_frames', 1)
-            if frames > cfg.max_pages:
-                raise ProcessingError('Too many image frames')
-            for index in range(frames):
-                image.seek(index)
-                if image.width * image.height > cfg.max_image_pixels:
-                    raise ProcessingError('Image pixel limit exceeded')
-                text, confidence = ocr(image)
-                yield {'page': index + 1, 'total': frames, 'text': text, 'method': 'tesseract_ocr', 'ocr_confidence': confidence}
+        formats = {'.jpg': 'JPEG', '.jpeg': 'JPEG', '.png': 'PNG', '.tif': 'TIFF', '.tiff': 'TIFF'}
+        try:
+            with Image.open(path, formats=[formats[extension]]) as image:
+                frames = getattr(image, 'n_frames', 1)
+                if frames > cfg.max_pages:
+                    raise ProcessingError('Too many image frames')
+                for index in range(frames):
+                    image.seek(index)
+                    if image.width * image.height > cfg.max_image_pixels:
+                        raise ProcessingError('Image pixel limit exceeded')
+                    yield {'page': index + 1, 'total': frames} | ocr(image)
+        except (UnidentifiedImageError, Image.DecompressionBombError, OSError, EOFError) as exc:
+            raise ProcessingError('Corrupt, oversized, or unsupported image.') from exc
     elif extension == '.xlsx':
         import openpyxl
         book = openpyxl.load_workbook(path, read_only=True, data_only=True, keep_links=False)
@@ -169,7 +246,7 @@ def units(path: Path, extension: str):
                 yield sheet_unit(sheet.name, rows, book.nsheets)
         finally:
             book.release_resources()
-    else:
+    elif extension == '.csv':
         raw = path.read_bytes()
         encoding = from_bytes(raw).best()
         if encoding is None:
@@ -194,6 +271,8 @@ def units(path: Path, extension: str):
             yield sheet_unit('CSV', rows, 1) | {'encoding': encoding.encoding}
         except csv.Error as exc:
             raise ProcessingError('Malformed CSV') from exc
+    else:
+        raise ProcessingError('Unsupported document format.')
 
 
 def sheet_unit(name, rows, total, formulas=None):

@@ -4,7 +4,7 @@ A working local financial-document workflow: upload private files, process them 
 
 Built against the supplied **Ai Engineer Task 1.3.pdf** (seven tasks, nine deliverables). The application is intended for local demonstration; no deployment was performed. All bundled financial records are clearly synthetic.
 
-**Verified:** persistent SQLite + background-process demo, digital PDF/XLSX/XLS/CSV parsing, Decimal validation, comparisons, review/corrections, authenticated API, production Next.js build and real Chromium acceptance workflow. **Not verified here:** real OCR binary, live LLM/embeddings, PostgreSQL/Redis/Celery runtime and 1000-page throughput. Deterministic demo parsing is explicitly labeled and is not AI.
+**Verified:** SQLite, digital PDF/XLSX/XLS/CSV parsing, real Tesseract OCR for image and scanned PDF uploads, Decimal validation, comparisons, manual correction, authenticated API, and Chromium workflows. Live LLM and embeddings, PostgreSQL/Redis/Celery, and 1,000-page throughput remain unverified.
 
 ![Dashboard with real synthetic records](docs/dashboard-preview.png)
 
@@ -86,7 +86,9 @@ Copy values deliberately from `.env.example`; do not overwrite the generated loc
 | LLM_API_KEY / LLM_BASE_URL / LLM_MODEL | Private structured-output provider configuration |
 | MAX_LLM_CHUNKS | Maximum provider chunks per document, default 100; not a dollar spending cap |
 | EMBEDDINGS_ENABLED / EMBEDDING_MODEL / EMBEDDING_DIMENSIONS | Optional real vector indexing; PostgreSQL required |
-| TESSERACT_CMD | Optional absolute path to free OCR executable |
+| TESSERACT_CMD | Native Tesseract executable path. Falls back to `tesseract` on PATH when empty. |
+| TESSERACT_DATA_DIR | Optional language-data directory containing `.traineddata` files |
+| OCR_LANGUAGE / OCR_REVIEW_THRESHOLD | Language code or combination such as `eng+ben`, and mean word confidence threshold for review (default 0.80) |
 | MAX_FILE_MB / MAX_UPLOAD_FILES / MAX_PAGES | Resource limits (defaults 30 / 10 / 1200) |
 | OCR_TIMEOUT / JOB_TIMEOUT | Per-OCR and processing budgets (30 / 3600 seconds) |
 | CURRENCY_TOLERANCES | Optional JSON currency→decimal-string tolerance overrides |
@@ -122,7 +124,7 @@ Inspect existing records without modifying them:
 
 The inventory is saved privately to `data/inspection/records-report.csv` and JSON, including filename, ID, upload time, status, likely source and cleanup eligibility. Cleanup is **dry-run by default**. Historical fixture-looking names/checksums never establish eligibility; manually uploaded invoices, CVs and unproven records stay untouched. No cleanup deletion was executed. See [safe cleanup and recovery](docs/testing.md#optional-cleanup) for exact run selection, confirmation and quarantine behavior. Never delete a database or storage directory to clear the dashboard.
 
-The measured initial evaluation had 8/14 processing successes, 42.86% failures including five unavailable-OCR fixtures and deliberately corrupt PDF. Eight header fields on the eight successful synthetic documents matched ground truth (64/64). This is not overall AI accuracy or performance on arbitrary layouts. Re-run and consult the report for latest measured timing. No large-file benchmark was performed.
+The Windows OCR run used the project-local Tesseract 5.5.4 build. It processed 13/14 files in the original evaluation and 7/8 in a dedicated scan benchmark. The deliberate corrupt files failed. The scan benchmark includes image-only, multipage and mixed PDFs. See the [measured results and limitations](docs/evaluation-report.md) and [Windows setup](docs/setup-windows.md#ocr).
 
 ## Demonstration and submission
 

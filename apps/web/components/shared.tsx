@@ -57,6 +57,8 @@ export type Config = {
 };
 
 export type Source = {
+  ocr_language?: string;
+  ocr_confidence?: number | null;
   sheet?: string;
   page?: number;
   rows?: unknown[][];

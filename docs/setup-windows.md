@@ -29,13 +29,33 @@ Open **http://localhost:3000**. Use `localhost` consistently; browsing frontend 
 
 ## OCR
 
-Tesseract is free. Follow the Windows distribution links from [Tesseract documentation](https://tesseract-ocr.github.io/tessdoc/Installation.html). Install a trusted build and set, in `.env`:
+The following PowerShell commands install the verified 64-bit Windows build, Tesseract 5.5.4 from conda-forge, inside ignored project data. Run from the project root in a normal PowerShell terminal. The setup uses the upstream micromamba download, a project-local package cache, and about 217 MB of package downloads. It requires no administrator access. [Micromamba Windows instructions](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html#windows) · [conda-forge Tesseract](https://anaconda.org/channels/conda-forge/packages/tesseract)
 
-```dotenv
-TESSERACT_CMD=C:/Program Files/Tesseract-OCR/tesseract.exe
+```powershell
+$ocrTools = Join-Path (Get-Location) 'data/ocr-tools'
+New-Item -ItemType Directory -Force $ocrTools | Out-Null
+Invoke-WebRequest https://micro.mamba.pm/api/micromamba/win-64/latest -OutFile "$ocrTools/micromamba.tar.bz2"
+tar.exe -xf "$ocrTools/micromamba.tar.bz2" -C $ocrTools Library/bin/micromamba.exe
+$env:MAMBA_ROOT_PREFIX = "$ocrTools/cache"
+& "$ocrTools/Library/bin/micromamba.exe" --no-rc create --yes --override-channels -c conda-forge -p "$ocrTools/tesseract" tesseract=5.5.4
+$env:TESSERACT_CMD = "$ocrTools/tesseract/Library/bin/tesseract.exe"
+$env:TESSERACT_DATA_DIR = "$ocrTools/tesseract/share/tessdata"
+$env:OCR_LANGUAGE = 'eng'
+& $env:TESSERACT_CMD --version
+& $env:TESSERACT_CMD --list-langs --tessdata-dir $env:TESSERACT_DATA_DIR
 ```
 
-Restart the API. Verify Settings reports OCR available; run OCR tests/evaluation. Python `pytesseract` is an interface, not the OCR executable. The Docker image includes the Linux executable and English language data. Other languages require installed traineddata and explicit extension of the OCR configuration. No OCR installation was performed on this host; tests clearly report that limit.
+For normal development, put the three settings in the ignored `.env` using the paths above. You can also use paths relative to the repo when starting the API from the root. The verified local values are:
+
+```dotenv
+TESSERACT_CMD=data/ocr-tools/tesseract/Library/bin/tesseract.exe
+TESSERACT_DATA_DIR=data/ocr-tools/tesseract/share/tessdata
+OCR_LANGUAGE=eng
+```
+
+If you already have the [UB Mannheim Windows distribution](https://github.com/UB-Mannheim/tesseract/wiki), use its `tesseract.exe` and `tessdata` directory instead. Ask your administrator to install that distribution if your organization requires a managed system-level installation. Required models must appear in `--list-langs`. Set `OCR_LANGUAGE=eng+ben` to enable English and Bengali together when both are available. The Docker image includes English; add other traineddata to the worker image and configure both services consistently. [Tesseract installation guide](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+
+Restart the API and any separate worker, then check OCR availability in Settings. Keep the PowerShell environment variables exported for isolated tests and evaluation because those runners do not load development configuration. See [testing commands](testing.md#safe-commands). OCR uses the native executable with an explicit argument vector so Windows language-data paths with spaces work.
 
 ## PostgreSQL, Redis and Celery with Docker
 

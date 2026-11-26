@@ -1,0 +1,43 @@
+{
+  "header": {
+    "invoice_number": "SCAN-2048",
+    "invoice_date": "2026-11-20",
+    "supplier_name": "Synthetic Atlas Supplies",
+    "customer_name": "Synthetic Harbor Lab",
+    "subtotal": "160.00",
+    "tax": "16.00",
+    "total": "176.00",
+    "currency": "USD"
+  },
+  "line_amounts": [
+    "80.00",
+    "80.00"
+  ],
+  "files": {
+    "clear.png": [
+      "tesseract_ocr"
+    ],
+    "clear.jpg": [
+      "tesseract_ocr"
+    ],
+    "scanned.tiff": [
+      "tesseract_ocr",
+      "tesseract_ocr"
+    ],
+    "scanned.pdf": [
+      "tesseract_ocr"
+    ],
+    "multipage.pdf": [
+      "tesseract_ocr",
+      "tesseract_ocr"
+    ],
+    "mixed.pdf": [
+      "digital_pdf",
+      "tesseract_ocr"
+    ],
+    "low-quality.jpg": [
+      "tesseract_ocr"
+    ],
+    "corrupt.png": null
+  }
+}

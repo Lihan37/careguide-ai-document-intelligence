@@ -314,7 +314,8 @@ def corrections(document_id: str, body: Correction, user=Depends(reviewer), db=D
     audit(db, user, document_id, 'correction', {'reason': body.reason, 'changes': {k: {'old': original.get(k), 'new': effective.get(k)} for k in body.fields}})
     document.corrected = document.corrected | {k: effective[k] for k in body.fields}
     document.invoice_number, document.supplier = invoice.invoice_number, invoice.supplier_name
-    document.issues = validate(invoice) + duplicates(document, db.scalars(select(Document).where(Document.owner_id == user.id)).all(), effective)
+    ocr_warnings = [issue for issue in document.issues if issue['rule_id'] == 'ocr_review']
+    document.issues = validate(invoice) + duplicates(document, db.scalars(select(Document).where(Document.owner_id == user.id)).all(), effective) + ocr_warnings
     document.status = 'REQUIRES_REVIEW' if document.issues else 'COMPLETED'
     document.review_status = 'pending'
     db.commit()

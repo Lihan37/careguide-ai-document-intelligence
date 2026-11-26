@@ -200,7 +200,7 @@ def extract_invoice(source_units):
     candidates, item_rows, issues = {}, [], []
 
     def source(unit, excerpt, **extra):
-        return {k: unit[k] for k in ('document_id', 'page', 'sheet', 'method') if k in unit} | {'excerpt': excerpt, 'confidence': None, 'confidence_basis': 'deterministic label/table match; uncalibrated'} | extra
+        return {k: unit[k] for k in ('document_id', 'page', 'sheet', 'method', 'coordinate_space', 'ocr_confidence') if k in unit} | {'excerpt': excerpt, 'confidence': None, 'confidence_basis': 'deterministic label/table match; uncalibrated'} | extra
 
     def offer(field, raw, reference):
         if field is None or field.startswith('_') or raw is None or str(raw).strip() == '':

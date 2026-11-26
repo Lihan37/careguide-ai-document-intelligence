@@ -13,6 +13,27 @@ test.beforeEach(async ({ request }) => {
   expect(identity).toEqual({ environment: 'test', automation_kind: 'playwright', run_id: context.run_id });
 });
 
+test('scanned invoice reaches the dashboard with OCR evidence', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Password', { exact: true }).fill(password!);
+  await page.getByRole('button', { name: 'Sign in to workspace' }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  const settings = await page.request.get(apiUrl + '/api/settings');
+  expect(settings.ok()).toBeTruthy();
+  test.skip(!(await settings.json()).ocr_available, 'Configure Tesseract and its language data for the browser runner');
+  await page.getByRole('link', { name: 'Upload Documents', exact: true }).click();
+  await page.getByLabel('Choose documents').setInputFiles(path.join(root, 'sample-data/ocr/multipage.pdf'));
+  await page.getByRole('button', { name: 'Upload 1 document', exact: true }).click();
+  await page.getByRole('link', { name: 'Open document', exact: true }).click();
+  await expect(page.getByText('176.00', { exact: true })).toBeVisible({ timeout: 45000 });
+  await page.getByRole('tab', { name: 'Source text' }).click();
+  await expect(page.getByRole('heading', { name: 'Page 2 · tesseract_ocr' })).toBeVisible();
+  await expect(page.getByText(/mean word confidence/)).toHaveCount(2);
+  const id = new URL(page.url()).pathname.split('/').pop();
+  const response = await page.request.get(`${apiUrl}/api/documents/${id}/validation`);
+  expect(await response.json()).toEqual({ outcome: 'PASSED', issues: [] });
+});
+
 test('compound VAT label preserves printed tax and all four invoice items', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill(password!);
