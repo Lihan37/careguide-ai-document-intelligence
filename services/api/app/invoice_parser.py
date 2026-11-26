@@ -244,8 +244,10 @@ def extract_invoice(source_units):
                 if right and not label_pair(right[0]['text'])[0] and normalized(field, right[0]['text']) is not None:
                     offer(field, right[0]['text'], source(unit, cell['text'] + ' | ' + right[0]['text'], bbox=right[0]['bbox'], label_bbox=cell['bbox']))
                     continue
+                label_height = cell['bbox'][3] - cell['bbox'][1]
+                search_height = max(45, label_height * 3) if unit.get('method') == 'tesseract_ocr' else 45
                 for below in rows[index + 1:index + 4]:
-                    if below['center'] - row['center'] > 45:
+                    if below['center'] - row['center'] > search_height:
                         break
                     aligned = [c for c in below['cells'] if abs(c['bbox'][0] - cell['bbox'][0]) < 22]
                     if aligned:
@@ -259,7 +261,9 @@ def extract_invoice(source_units):
         for index, line in enumerate(lines):
             field, value = label_pair(line)
             if field and value:
-                offer(field, value, source(unit, line))
+                # A flattened row can concatenate two labels, such as Supplier and Customer.
+                if not rows or key(value) not in ALIASES or ':' in line:
+                    offer(field, value, source(unit, line))
             elif field and not rows and (index == 0 or not label_pair(lines[index - 1])[0] or label_pair(lines[index - 1])[1]):
                 labels = []
                 cursor = index

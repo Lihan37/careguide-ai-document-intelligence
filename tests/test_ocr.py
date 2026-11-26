@@ -65,6 +65,46 @@ def upload(client, filename, data):
     return response.json()['results'][0]
 
 
+def test_image_only_invoice_with_light_text_in_dark_table_header(client, require_ocr):
+    with pymupdf.open() as drawing, pymupdf.open() as scan:
+        page = drawing.new_page(width=595, height=700)
+        rows = [
+            (52, [(45, 'INVOICE NUMBER: PAGE-411'), (365, 'Currency: USD')]),
+            (77, [(45, 'Invoice Date: 2026-09-18')]),
+            (116, [(45, 'SUPPLIER'), (315, 'CUSTOMER')]),
+            (142, [(45, 'Newport Paper Co.'), (315, 'Demo Finance')]),
+            (243, [(54, 'Description'), (295, 'Qty'), (360, 'Unit Price'), (475, 'Amount')]),
+            (277, [(54, 'White paper'), (295, '2'), (360, '12.50'), (475, '25.00')]),
+            (306, [(54, 'Blue folders'), (295, '1'), (360, '15.00'), (475, '15.00')]),
+            (357, [(320, 'Subtotal: USD 40.00')]),
+            (386, [(320, 'Tax: USD 4.00')]),
+            (415, [(320, 'Grand Total: USD 44.00')]),
+        ]
+        page.draw_rect(pymupdf.Rect(44, 224, 553, 253), color=None, fill=(.10, .18, .28))
+        for y, cells in rows:
+            for x, text in cells:
+                page.insert_text((x, y), text, fontsize=13, color=(1, 1, 1) if y == 243 else (0, 0, 0))
+        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(3, 3), alpha=False)
+        scan_page = scan.new_page(width=page.rect.width, height=page.rect.height)
+        scan_page.insert_image(scan_page.rect, pixmap=pixmap)
+        assert not scan_page.get_text() and scan.embfile_count() == 0
+        result = upload(client, 'scanned-table.pdf', scan.tobytes(deflate=True))
+
+    url = f'/api/documents/{result["document_id"]}'
+    document = client.get(url).json()
+    assert document['status'] == 'COMPLETED', document['issues']
+    assert document['sources'][0]['method'] == 'tesseract_ocr'
+    assert document['sources'][0]['ocr_seconds'] > 0
+    invoice = document['effective']
+    assert invoice['supplier_name'] == 'Newport Paper Co.' and invoice['customer_name'] == 'Demo Finance'
+    assert [tuple(Decimal(line[field]) for field in ('quantity', 'unit_price', 'line_amount')) for line in invoice['line_items']] == [
+        (Decimal('2'), Decimal('12.50'), Decimal('25.00')),
+        (Decimal('1'), Decimal('15.00'), Decimal('15.00')),
+    ]
+    assert document['evidence']['line_items']['items'][0]['quantity']['method'] == 'tesseract_ocr'
+    assert client.get(url + '/validation').json() == {'outcome': 'PASSED', 'issues': []}
+
+
 def test_corrupt_image_job_failure_and_unrelated_upload(client, require_ocr):
     result = upload(client, 'bad.png', (FIXTURES / 'corrupt.png').read_bytes())
     status = client.get(f'/api/documents/{result["document_id"]}/status').json()

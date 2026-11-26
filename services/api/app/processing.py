@@ -73,6 +73,29 @@ def ocr_available():
     return bool(command and set(settings().ocr_language.split('+')) <= languages)
 
 
+def normalize_dark_bands(pixels):
+    """Make light lettering on broad, solid bands readable as dark text."""
+    import cv2
+    import numpy as np
+
+    width = pixels.shape[1]
+    close_size = max(3, min(31, round(width * .015))) | 1
+    closing = cv2.getStructuringElement(cv2.MORPH_RECT, (close_size, close_size))
+    opening = cv2.getStructuringElement(cv2.MORPH_RECT, (max(3, round(width * .025)) | 1,
+                                                       max(3, round(width * .013)) | 1))
+    dark_pixels = cv2.inRange(pixels, 0, 100)
+    mask = cv2.morphologyEx(dark_pixels, cv2.MORPH_CLOSE, closing)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    mask.fill(0)
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if (w >= width / 4 and w >= h * 3 and cv2.contourArea(contour) >= w * h * .85
+                and cv2.countNonZero(dark_pixels[y:y + h, x:x + w]) >= w * h * .65):
+            cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED)
+    return np.bitwise_xor(pixels, mask, out=pixels)
+
+
 def preprocess(image):
     image = ImageOps.exif_transpose(image).convert('L')
     image = ImageOps.autocontrast(image)
@@ -88,7 +111,7 @@ def preprocess(image):
         if 0.2 < abs(angle) < 12:
             matrix = cv2.getRotationMatrix2D((array.shape[1] / 2, array.shape[0] / 2), angle, 1)
             array = cv2.warpAffine(array, matrix, (array.shape[1], array.shape[0]), borderValue=255)
-    return Image.fromarray(array)
+    return Image.fromarray(normalize_dark_bands(array))
 
 
 def ocr(image):
@@ -170,13 +193,21 @@ def units(path: Path, extension: str):
     cfg = settings()
     if extension == '.pdf':
         import pymupdf
-        with pymupdf.open(path) as pdf:
+        try:
+            pdf = pymupdf.open(path, filetype='pdf')
+        except pymupdf.FileDataError as exc:
+            raise ProcessingError('Malformed or corrupt PDF') from exc
+        with pdf:
+            if not pdf.is_pdf or pdf.is_repaired:
+                raise ProcessingError('Malformed or corrupt PDF')
             if pdf.needs_pass or pdf.page_count > cfg.max_pages or pdf.page_count == 0:
                 raise ProcessingError('Encrypted, empty, or over-limit PDF')
             if pdf.xref_length() > 200000:
                 raise ProcessingError('PDF object limit exceeded')
-            if pdf.embfile_count() or any(re.search(r'/JavaScript\b|/JS\b|/Launch\b|/OpenAction\b', pdf.xref_object(i)) for i in range(1, pdf.xref_length())):
-                raise ProcessingError('Active content or embedded files rejected')
+            if pdf.embfile_count():
+                raise ProcessingError('Embedded PDF files rejected. Create a new PDF from the original page images without attachments.')
+            if any(re.search(r'/JavaScript\b|/JS\b|/Launch\b|/OpenAction\b', pdf.xref_object(i)) for i in range(1, pdf.xref_length())):
+                raise ProcessingError('Active content rejected')
             for index in range(pdf.page_count):
                 page = pdf[index]
                 text = page.get_text()
@@ -187,7 +218,7 @@ def units(path: Path, extension: str):
                     for image in page.get_image_info()
                 )
                 if len(text.strip()) < 30 or sparse_scan:
-                    scale = min(2.0, (cfg.max_image_pixels / max(1, page.rect.width * page.rect.height)) ** 0.5)
+                    scale = min(2.2, (cfg.max_image_pixels / max(1, page.rect.width * page.rect.height)) ** 0.5)
                     bounds = (page.rect * pymupdf.Matrix(scale, scale)).irect
                     if bounds.width * bounds.height > cfg.max_image_pixels:
                         scale *= .995 * (cfg.max_image_pixels / (bounds.width * bounds.height)) ** .5

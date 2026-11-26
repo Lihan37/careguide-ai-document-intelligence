@@ -21,6 +21,12 @@
 
 Tests exercise unauthenticated requests, foreign-owner access, viewer mutation, conflicting origins, unsafe uploads, provider errors, cancellation, duplicate deliveries and stale recovery. A dependency advisory scan flagged the former Pillow 12.3.0 pin. After updating to Pillow 13.0.0, `pip-audit` and `npm audit` reported no known findings in the audited lockfiles, and `pip check` passed. The final Git scan checked indexed files for credential signatures and private paths. These checks cover the assessed dependencies and workflows. Production penetration testing remains open. [Pillow release notes](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html)
 
+## Scans with embedded attachments
+
+An image-only page can be part of a PDF that contains an embedded file. Document-level C2PA Content Credentials are stored as an attachment and fall under the same rejection policy. The processing worker reports an attachment-specific error before OCR. It also rejects damaged PDFs that require cross-reference repair. [C2PA PDF manifest format](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#a4-embedding-manifests-into-pdfs)
+
+If you trust the original scan, upload its JPG or PNG directly. For a PDF, use the trusted page images to create a new image-only PDF, with one image per page and attachment or Content Credentials export disabled. Keep the original file to preserve its provenance and upload the new file as a separate document so the original processing history stays available.
+
 ## Deployment work remaining
 
 Do not expose this local assessment to the public without TLS, a hardened upload proxy, shared rate limiting, enterprise identity/session revocation, isolated workers (no outbound network except explicit provider access), malware scanning as appropriate, secret management, backups, retention policies, disk quotas and operational monitoring. Container image dependencies and Compose integration were not runtime verified here. File storage and audit DB require encrypted disks/backups for real financial records. Logout clears the browser cookie; a stolen cookie remains valid until expiration or SESSION_SECRET rotation. No public deployment was performed.
