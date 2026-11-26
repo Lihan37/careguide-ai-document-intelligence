@@ -39,14 +39,31 @@ import {
   Action,
 } from "./shared";
 
+type CandidateVersion = {
+  method: string;
+  effective: Record<string, unknown>;
+  issues: Issue[];
+  evidence: Record<string, unknown>;
+};
+
+type CandidateReview = {
+  status: "pending" | "accepted";
+  stale: boolean;
+  can_accept: boolean;
+  current: CandidateVersion;
+  candidate: CandidateVersion;
+};
+
 export function DocumentDetail({
   id,
   version,
   action,
+  canReview,
 }: {
   id: string;
   version: number;
   action: Action;
+  canReview: boolean;
 }) {
   const [document, setDocument] = useState<Detail | null>(null);
   const [error, setError] = useState("");
@@ -57,6 +74,10 @@ export function DocumentDetail({
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [lineJson, setLineJson] = useState("");
+  const [review, setReview] = useState<(CandidateReview & { jobId: string }) | null>(null);
+  const [candidateReason, setCandidateReason] = useState("");
+  const [candidateError, setCandidateError] = useState("");
+  const candidateRequest = useRef(0);
   useEffect(() => {
     let alive = true;
     const load = () =>
@@ -81,6 +102,22 @@ export function DocumentDetail({
   if (!document) return <div className="loading">Loading document…</div>;
   const ready = ["COMPLETED", "REQUIRES_REVIEW"].includes(document.status);
   const latestJob = document.history[0];
+  const activeJob = document.history.find((job) => ["QUEUED", "PROCESSING"].includes(job.status));
+  const progressJob = activeJob ?? (!ready ? latestJob : undefined);
+  const pendingCandidate = document.history.find((job) => job.candidate_status === "pending");
+  const openCandidate = async (jobId: string) => {
+    const request = ++candidateRequest.current;
+    setTab("History");
+    setCandidateError("");
+    setCandidateReason("");
+    setReview(null);
+    try {
+      const data = await api<CandidateReview>(`/api/documents/${id}/candidates/${jobId}`);
+      if (candidateRequest.current === request) setReview({ ...data, jobId });
+    } catch (e) {
+      if (candidateRequest.current === request) setCandidateError((e as Error).message);
+    }
+  };
   return (
     <>
       <section className="panel detail-summary">
@@ -106,7 +143,7 @@ export function DocumentDetail({
         </a>
         <button
           className="button secondary"
-          disabled={["PROCESSING", "QUEUED"].includes(document.status)}
+          disabled={Boolean(activeJob)}
           onClick={() =>
             action(
               () => api(`/api/documents/${id}/reprocess`, { method: "POST" }),
@@ -118,15 +155,20 @@ export function DocumentDetail({
         </button>
       </section>
       {document.error && <div className="alert error">{document.error}</div>}
-      {latestJob && !ready && (
+      {progressJob && (
         <section className="panel progress-panel">
-          <strong>{latestJob.stage}</strong>
-          <progress max="100" value={latestJob.progress} />
+          <strong>{progressJob.stage}</strong>
+          <progress max="100" value={progressJob.progress} />
           <span>
-            {latestJob.progress}% · {latestJob.pages_processed}/
-            {latestJob.total_pages} source units
+            {progressJob.progress}% · {progressJob.pages_processed}/
+            {progressJob.total_pages} source units
           </span>
         </section>
+      )}
+      {canReview && pendingCandidate && tab !== "History" && (
+        <button className="button secondary" onClick={() => openCandidate(pendingCandidate.id)}>
+          Review retry candidate
+        </button>
       )}
       <div className="tabs" role="tablist">
         {[
@@ -492,8 +534,77 @@ export function DocumentDetail({
                 {job.stage} · {job.progress}% · retry {job.retries}
               </span>
               {job.error && <p>{job.error}</p>}
+              {canReview && (job.candidate_status === "pending" || job.candidate_status === "accepted") && (
+                <button className="button secondary" onClick={() => openCandidate(job.id)}>
+                  Compare retry candidate
+                </button>
+              )}
             </div>
           ))}
+          {candidateError && <p role="alert">{candidateError}</p>}
+          {review && (
+            <div className="section-pad">
+              <h3>Retry comparison</h3>
+              {review.stale && <p>The current extraction changed after this retry. Run a new retry to propose a replacement.</p>}
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Field</th>
+                      <th>{review.status === "accepted" ? "Previous result" : "Current result"}<br />{review.current.method}</th>
+                      <th>{review.status === "accepted" ? "Accepted replacement" : "Retry candidate"}<br />{review.candidate.method}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fields.map((field) => (
+                      <tr key={field}>
+                        <td>{label(field)}</td>
+                        {[review.current, review.candidate].map((result, i) => (
+                          <td key={i}>
+                            {display(result.effective[field])}
+                            <Evidence value={result.evidence[field]} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    <tr>
+                      <td>Line items</td>
+                      {[review.current, review.candidate].map((result, i) => (
+                        <td key={i}>
+                          <Json data={result.effective.line_items} />
+                          <details><summary>Line item evidence</summary><Json data={result.evidence.line_items} /></details>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td>Validation issues</td>
+                      <td><Json data={review.current.issues} /></td>
+                      <td><Json data={review.candidate.issues} /></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              {review.can_accept && (
+                <form onSubmit={(event) => {
+                  event.preventDefault();
+                  action(async () => {
+                    await api(`/api/documents/${id}/candidates/${review.jobId}/accept`, {
+                      method: "POST",
+                      body: JSON.stringify({ reason: candidateReason }),
+                    });
+                    setReview(null);
+                  }, "Candidate accepted");
+                }}>
+                  <label>Reason for accepting
+                    <input required minLength={3} maxLength={2000} value={candidateReason} onChange={(event) => setCandidateReason(event.target.value)} />
+                  </label>
+                  <button className="button primary" type="submit" disabled={Boolean(activeJob) || candidateReason.trim().length < 3}>
+                    Accept replacement
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
           <h2>Audit trail</h2>
           {document.audit.map((entry, i) => (
             <details key={i} className="audit-entry">

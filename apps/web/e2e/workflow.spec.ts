@@ -13,6 +13,27 @@ test.beforeEach(async ({ request }) => {
   expect(identity).toEqual({ environment: 'test', automation_kind: 'playwright', run_id: context.run_id });
 });
 
+test("equivalent retry preserves the current extraction in the browser", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Password", { exact: true }).fill(password!);
+  await page.getByRole("button", { name: "Sign in to workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Upload Documents", exact: true }).click();
+  await page.getByLabel("Choose documents").setInputFiles(path.join(root, "sample-data/layout-invoice.pdf"));
+  await page.getByRole("button", { name: "Upload 1 document", exact: true }).click();
+  await page.getByRole("link", { name: "Open document", exact: true }).click();
+  await expect(page.getByText("9350.00", { exact: true })).toBeVisible({ timeout: 45000 });
+  const id = new URL(page.url()).pathname.split("/").pop();
+  const extractionUrl = apiUrl + "/api/documents/" + id + "/extraction";
+  const before = await (await page.request.get(extractionUrl)).json();
+  await page.getByRole("button", { name: "Retry processing" }).click();
+  await page.getByRole("tab", { name: "History" }).click();
+  await expect(page.getByText(/Equivalent extraction; current result retained/)).toBeVisible({ timeout: 45000 });
+  const after = await (await page.request.get(extractionUrl)).json();
+  expect(after).toEqual(before);
+  await expect(page.getByRole("button", { name: "Compare retry candidate" })).toHaveCount(0);
+});
+
 test('scanned invoice reaches the dashboard with OCR evidence', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill(password!);

@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from typing import Annotated
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 Money = Annotated[Decimal, Field(allow_inf_nan=False, max_digits=20, decimal_places=6)]
 
@@ -48,6 +48,10 @@ class Login(Strict):
 class Correction(Strict):
     fields: dict
     reason: str = Field(min_length=3, max_length=2000)
+
+
+class CandidateAcceptance(Strict):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=2000)]
 
 
 class Review(Strict):

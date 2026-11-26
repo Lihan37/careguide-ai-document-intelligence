@@ -39,6 +39,7 @@ export type Job = {
   total_pages: number;
   retries: number;
   error: string | null;
+  candidate_status: "pending" | "accepted" | "equivalent" | null;
 };
 
 export type Config = {

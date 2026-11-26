@@ -14,7 +14,9 @@ Base URL: `http://localhost:8000`. Interactive OpenAPI: `/docs`; machine schema:
 | GET | /api/documents/{id}/extraction | Original, corrections, effective values, evidence and extraction method |
 | GET | /api/documents/{id}/validation | PASSED/WARNING/FAILED/REQUIRES_REVIEW and rule details |
 | GET | /api/documents/{id}/source | Authenticated original download/inline PDF; optional `page=1` renders bounded PNG |
-| POST | /api/documents/{id}/reprocess | 202; new attempt, maximum three manual retries; 409 while active |
+| POST | /api/documents/{id}/reprocess | 202; new attempt, maximum three manual retries and 409 while active. Existing extracts remain current during the attempt. |
+| GET | /api/documents/{id}/candidates/{job_id} | Reviewer/admin only. Compare current and proposed effective values, evidence and validation issues, or view an accepted candidate and its previous result. |
+| POST | /api/documents/{id}/candidates/{job_id}/accept | Reviewer/admin only. Supply `{"reason":"Reviewed source evidence"}`. Returns 409 for a stale or already accepted candidate or an active processing job. |
 | PATCH | /api/documents/{id}/corrections | `{fields:{total:"220.00"},reason:"Source checked"}`; strict schema, audit old/new, revalidate |
 | GET | /api/jobs | Paged processing history (`page`, `page_size`) |
 | GET | /api/jobs/{id} | Status, stage, progress, counters, retries and error |

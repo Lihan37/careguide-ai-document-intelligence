@@ -1,6 +1,6 @@
 # Database schema
 
-Alembic revision `0001` creates the relational schema and PostgreSQL vector extension. Revision `0002` adds composite indexes and removes the PostgreSQL column's fixed 1,536-dimensional type constraint while retaining existing vectors. SQLite keeps its existing vector column definition and has keyword search. Run migrations against the intended database before starting the API.
+Alembic revision `0001` creates the relational schema and PostgreSQL vector extension. Revision `0002` adds composite indexes and removes the PostgreSQL column's fixed 1,536-dimensional type constraint while retaining existing vectors. Revision `0003` adds retry candidate snapshots to job history. Run `python -m alembic upgrade head` against the intended database before starting or restarting the API and workers.
 
 The final Windows installation applied both revisions to fresh SQLite. The PostgreSQL service regression verified the upgrade against a disposable database with a pre-existing legacy vector. See [isolation and stack verification](testing.md#postgresql-redis-and-celery-verification).
 
@@ -20,7 +20,7 @@ erDiagram
 | users | UUID, unique username, salted scrypt hash, reviewer/viewer/admin role |
 | documents | Owner FK; original name/type/size/checksum/private path; status/upload time; page/sheet counts, processing duration and safe error; raw invoice JSON, partial corrections JSON, evidence JSON, validation issues JSON, extracted text, review status; indexed normalized lookup columns |
 | source_units | Document FK, ordered position and JSON page or worksheet, including text blocks, OCR confidence or typed cell rows/formula cache evidence |
-| processing_jobs | Document FK; status, progress, stage, page counters, retry count, created/updated times and safe error |
+| processing_jobs | Document FK; status, progress, stage, page counters, retry count, created/updated times and safe error. Protected retries also record candidate state and proposed extraction. Accepted candidates archive the replaced extraction and its sources. |
 | audit_logs | Actor FK, optional document FK, timestamp, action and immutable application-level detail snapshots (old/new field values, reason, notes, comparison mappings, provider usage) |
 | document_comparisons | Owner FK, ordered document UUIDs, timestamp and complete pairwise baseline result snapshots with source evidence |
 | document_embeddings | Document FK, exact source chunk and offsets, page or sheet when known, model identifier, pgvector vector |

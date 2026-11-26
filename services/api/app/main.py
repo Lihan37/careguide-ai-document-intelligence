@@ -10,15 +10,17 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import select, func, or_, update, text as sqltext
+from sqlalchemy import select, func, or_, text as sqltext
 from sqlalchemy.exc import SQLAlchemyError
 from .config import settings, request_environment_matches
-from .db import Session, User, Document, SourceUnit, Job, Audit, Comparison, get_db, uid
+from .db import Session, User, Document, SourceUnit, Job, Audit, Comparison, get_db, now, uid
 from .security import current_user, reviewer, password_check, password_hash, token
-from .schemas import Login, Invoice, Correction, Review, CompareRequest, SemanticRequest
+from .schemas import Login, Invoice, Correction, Review, CompareRequest, SemanticRequest, CandidateAcceptance
 from .processing import EXTENSIONS, signature, ProcessingError, ocr_available
 from .validation import validate, duplicates
 from .jobs import dispatch, recover_stale
+from .reprocessing import (ACTIVE_JOB, current_revision, current_snapshot, effective_invoice, evaluated_issues,
+                           has_active_job, has_current_extraction, lock_document, publish, source_units)
 from .comparison import compare, mapped_invoice
 from .limits import RequestBodyLimit
 
@@ -42,7 +44,6 @@ async def lifespan(app):
 
 
 app = FastAPI(title='CareGuide Document Intelligence', version='1.0.0', lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=[settings().cors_origin], allow_credentials=True, allow_methods=['GET', 'POST', 'PATCH'], allow_headers=['Content-Type', 'X-CareGuide-Environment', 'X-CareGuide-Run'])
 app.add_middleware(RequestBodyLimit)
 _requests = defaultdict(deque)
 
@@ -56,7 +57,8 @@ async def guard(request: Request, call_next):
         return JSONResponse({'detail': 'Origin rejected'}, status_code=403)
     # Bounded process-local rate limiter; production proxy must enforce shared limits.
     current = time.monotonic()
-    key = (request.client.host if request.client else 'unknown', 'login' if request.url.path == '/api/auth/login' else 'api')
+    login_attempt = request.method == 'POST' and request.url.path == '/api/auth/login'
+    key = (request.client.host if request.client else 'unknown', 'login' if login_attempt else 'api')
     queue = _requests[key]
     while queue and queue[0] < current - 60:
         queue.popleft()
@@ -79,14 +81,20 @@ async def guard(request: Request, call_next):
     return response
 
 
+# Handle browser preflights before rate limiting and keep CORS on guard responses.
+app.add_middleware(CORSMiddleware, allow_origins=[settings().cors_origin], allow_credentials=True,
+                   allow_methods=['GET', 'POST', 'PATCH'],
+                   allow_headers=['Content-Type', 'X-CareGuide-Environment', 'X-CareGuide-Run'])
+
+
 @app.exception_handler(Exception)
 async def unexpected_error(request, exc):
     logger.error('request_failed type=%s path=%s', type(exc).__name__, request.url.path)
     return JSONResponse({'detail': 'Internal operation failed'}, status_code=500)
 
 
-def owned(db, document_id, user):
-    document = db.get(Document, document_id)
+def owned(db, document_id, user, *, lock=False):
+    document = lock_document(db, document_id, user.id) if lock else db.get(Document, document_id)
     if not document or document.owner_id != user.id:
         raise HTTPException(404, 'Document not found')
     return document
@@ -102,7 +110,7 @@ def summary(document):
 
 
 def job_view(job):
-    result = {k: getattr(job, k) for k in ('id', 'document_id', 'status', 'stage', 'progress', 'pages_processed', 'total_pages', 'retries', 'error', 'created_at', 'updated_at')}
+    result = {k: getattr(job, k) for k in ('id', 'document_id', 'status', 'stage', 'progress', 'pages_processed', 'total_pages', 'retries', 'error', 'created_at', 'updated_at', 'candidate_status')}
     return result | {'created_at': timestamp(job.created_at), 'updated_at': timestamp(job.updated_at)}
 
 
@@ -281,32 +289,82 @@ def source(document_id: str, page: int | None = Query(None, ge=1), user=Depends(
 
 @app.post('/api/documents/{document_id}/reprocess', status_code=202)
 def reprocess(document_id: str, user=Depends(reviewer), db=Depends(get_db)):
-    document = owned(db, document_id, user)
-    claimed = db.execute(update(Document).where(Document.id == document_id,
-                                                Document.status.not_in(('QUEUED', 'PROCESSING')))
-                         .values(status='QUEUED', error=None))
-    if claimed.rowcount != 1:
+    document = owned(db, document_id, user, lock=True)
+    if has_active_job(db, document_id):
         raise HTTPException(409, 'Document already queued or processing')
     previous = db.scalar(select(Job).where(Job.document_id == document_id).order_by(Job.created_at.desc()))
     retries = previous.retries + 1 if previous else 1
     if retries > 3:
         raise HTTPException(409, 'Retry limit (3) reached; upload a corrected source')
-    job = Job(document_id=document_id, retries=retries)
+    preserves_current = has_current_extraction(document)
+    if not preserves_current:
+        document.status, document.error = 'QUEUED', None
+    job = Job(document_id=document_id, retries=retries, preserves_current=preserves_current)
     db.add(job)
     audit(db, user, document_id, 'reprocess', {'retry': retries})
     db.commit()
     try:
         dispatch(job.id)
     except Exception:
-        document.status = job.status = 'FAILED'
-        job.error = document.error = 'Worker dispatch unavailable'
+        document = owned(db, document_id, user, lock=True)
+        db.refresh(job)
+        if job.status == 'QUEUED':
+            job.status, job.stage, job.error = 'FAILED', 'Failed', 'Worker dispatch unavailable'
+            job.updated_at = now()
+            if not job.preserves_current:
+                document.status, document.error = 'FAILED', job.error
         db.commit()
     return job_view(job)
 
 
+def candidate_job(db, document_id, job_id):
+    job = db.get(Job, job_id)
+    if not job or job.document_id != document_id or job.candidate is None:
+        raise HTTPException(404, 'Extraction candidate not found')
+    return job
+
+
+@app.get('/api/documents/{document_id}/candidates/{job_id}')
+def review_candidate(document_id: str, job_id: str, user=Depends(reviewer), db=Depends(get_db)):
+    document = owned(db, document_id, user)
+    job = candidate_job(db, document_id, job_id)
+    result = job.candidate
+    current = result.get('replaced') or current_snapshot(document)
+    stale = job.candidate_status == 'pending' and current_revision(document) != result['base_revision']
+    return {
+        'status': job.candidate_status, 'stale': stale,
+        'can_accept': job.candidate_status == 'pending' and not stale and not has_active_job(db, document_id),
+        'current': {key: current[key] for key in ('method', 'issues', 'evidence')} |
+                   {'effective': current['raw'] | current['corrected']},
+        'candidate': {key: result[key] for key in ('method', 'issues', 'evidence')} |
+                     {'effective': result['raw'] | result['corrected']},
+    }
+
+
+@app.post('/api/documents/{document_id}/candidates/{job_id}/accept')
+def accept_candidate(document_id: str, job_id: str, body: CandidateAcceptance, user=Depends(reviewer), db=Depends(get_db)):
+    document = owned(db, document_id, user, lock=True)
+    job = candidate_job(db, document_id, job_id)
+    result = job.candidate
+    if job.candidate_status != 'pending' or current_revision(document) != result['base_revision']:
+        raise HTTPException(409, 'This candidate no longer matches the current extraction revision')
+    if has_active_job(db, document_id):
+        raise HTTPException(409, 'Wait for the active processing job before accepting a candidate')
+    invoice = effective_invoice(document, result['raw'])
+    issues = evaluated_issues(db, document, invoice, result['extraction_issues'])
+    replaced = current_snapshot(document) | {'sources': source_units(db, document_id)}
+    publish(db, document, result, invoice, issues)
+    job.candidate = result | {'replaced': replaced, 'issues': issues}
+    job.candidate_status = 'accepted'
+    audit(db, user, document_id, 'extraction_candidate_accepted',
+          {'job_id': job_id, 'reason': body.reason, 'previous_method': replaced['method'], 'method': result['method']})
+    db.commit()
+    return {'status': document.status, 'method': document.extraction_method, 'issues': document.issues}
+
+
 @app.patch('/api/documents/{document_id}/corrections')
 def corrections(document_id: str, body: Correction, user=Depends(reviewer), db=Depends(get_db)):
-    document = owned(db, document_id, user)
+    document = owned(db, document_id, user, lock=True)
     if document.status not in {'COMPLETED', 'REQUIRES_REVIEW'}:
         raise HTTPException(409, 'Wait for successful extraction before correcting')
     try:
@@ -347,10 +405,15 @@ def cancel_job(job_id: str, user=Depends(reviewer), db=Depends(get_db)):
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(404, 'Job not found')
-    document = owned(db, job.document_id, user)
-    if job.status not in {'QUEUED', 'PROCESSING'}:
+    document = owned(db, job.document_id, user, lock=True)
+    db.refresh(job)
+    if job.status not in ACTIVE_JOB:
         raise HTTPException(409, 'Only queued or active jobs can be cancelled')
-    job.status = document.status = 'CANCELLED'
+    job.status = 'CANCELLED'
+    job.stage = 'Cancelled'
+    if not job.preserves_current:
+        document.status = 'CANCELLED'
+    job.updated_at = now()
     audit(db, user, document.id, 'cancelled', {'job_id': job.id})
     db.commit()
     return job_view(job)
@@ -373,7 +436,7 @@ def review_queue(q: str = Query('', max_length=500), page: int = Query(1, ge=1),
 
 @app.post('/api/reviews/{document_id}/resolve')
 def resolve(document_id: str, body: Review, user=Depends(reviewer), db=Depends(get_db)):
-    document = owned(db, document_id, user)
+    document = owned(db, document_id, user, lock=True)
     if document.status not in {'COMPLETED', 'REQUIRES_REVIEW'}:
         raise HTTPException(409, 'Document extraction is not ready')
     if body.decision == 'approved' and any(i['severity'] in {'FAILED', 'REQUIRES_REVIEW'} for i in document.issues):
@@ -388,7 +451,8 @@ def resolve(document_id: str, body: Review, user=Depends(reviewer), db=Depends(g
 def create_comparison(body: CompareRequest, user=Depends(reviewer), db=Depends(get_db)):
     if len(set(body.document_ids)) != len(body.document_ids):
         raise HTTPException(422, 'Select distinct documents')
-    docs = [owned(db, id, user) for id in body.document_ids]
+    locked = {id: owned(db, id, user, lock=True) for id in sorted(body.document_ids)}
+    docs = [locked[id] for id in body.document_ids]
     values, evidence = {}, {}
     for document in docs:
         if document.status not in {'COMPLETED', 'REQUIRES_REVIEW'}:

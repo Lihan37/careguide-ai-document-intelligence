@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, ForeignKey, String, Text, JSON, DateTime, Integer, Float, Index, event
+from sqlalchemy import create_engine, ForeignKey, String, Text, JSON, DateTime, Integer, Float, Boolean, Index, event, false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import settings
 
@@ -71,6 +71,9 @@ class Job(Base):
     pages_processed: Mapped[int] = mapped_column(Integer, default=0)
     total_pages: Mapped[int] = mapped_column(Integer, default=0)
     retries: Mapped[int] = mapped_column(Integer, default=0)
+    preserves_current: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    candidate_status: Mapped[str | None] = mapped_column(String(20))
+    candidate: Mapped[dict | None] = mapped_column(JSON, deferred=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     error: Mapped[str | None] = mapped_column(Text)

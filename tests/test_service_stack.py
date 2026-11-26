@@ -290,7 +290,7 @@ def test_real_postgres_pgvector_redis_celery(real_stack):
             with psycopg.connect(dsn) as db:
                 metrics['postgresql'] = db.execute('SHOW server_version').fetchone()[0]
                 metrics['pgvector'] = db.execute("SELECT extversion FROM pg_extension WHERE extname='vector'").fetchone()[0]
-                assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '0002'
+                assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '0003'
                 assert db.execute('SELECT DISTINCT vector_dims(vector) FROM document_embeddings ORDER BY 1').fetchall() == [(384,), (1536,)]
                 legacy = db.execute("SELECT vector::text FROM document_embeddings WHERE text='Migration sentinel'").fetchone()[0]
                 assert json.loads(legacy) == [1] + [0] * 1535

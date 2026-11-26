@@ -262,9 +262,11 @@ export default function Workspace() {
             />
           ) : path.startsWith("/documents/") ? (
             <DocumentDetail
+              key={path}
               id={path.split("/")[2]}
               version={version}
               action={action}
+              canReview={["reviewer", "admin"].includes(user.role)}
             />
           ) : path === "/jobs" ? (
             <Jobs version={version} action={action} />

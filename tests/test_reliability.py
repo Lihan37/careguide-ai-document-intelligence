@@ -13,6 +13,20 @@ from app.jobs import run_job
 from test_api import upload
 
 
+def test_cors_preflights_do_not_use_request_limits(client):
+    endpoint = '/api/auth/login'
+    origin = {'Origin': settings().cors_origin}
+    preflight = origin | {'Access-Control-Request-Method': 'POST'}
+    for _ in range(300):
+        assert client.options(endpoint, headers=preflight).status_code == 200
+    assert client.get('/api/health', headers=origin).status_code == 200
+    for _ in range(9):
+        assert client.post(endpoint, json={'username': 'invalid', 'password': 'invalid'}).status_code == 401
+    limited = client.post(endpoint, json={'username': 'invalid', 'password': 'invalid'}, headers=origin)
+    assert limited.status_code == 429
+    assert limited.headers['Access-Control-Allow-Origin'] == settings().cors_origin
+
+
 def test_formula_cache_not_recalculated(tmp_path):
     path = tmp_path / 'formula.xlsx'
     book = openpyxl.Workbook()
