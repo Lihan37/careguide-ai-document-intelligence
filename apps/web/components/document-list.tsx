@@ -28,7 +28,7 @@ import {
   Detail,
   Comparison,
   fields,
-  label,
+  processingStatusLabel,
   display,
   date,
   api,
@@ -118,7 +118,7 @@ export function DocumentList({
         {mode !== "/review" && (
           <>
             <select
-              aria-label="Filter by status"
+              aria-label="Filter by processing status"
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value);
@@ -136,7 +136,7 @@ export function DocumentList({
                 "CANCELLED",
               ].map((s) => (
                 <option key={s} value={s}>
-                  {label(s.toLowerCase())}
+                  {processingStatusLabel(s)}
                 </option>
               ))}
             </select>

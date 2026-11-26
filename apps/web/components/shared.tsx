@@ -157,7 +157,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json();
 }
 
-export function Badge({ status }: { status: string }) {
+export function Badge({ status, text }: { status: string; text?: string }) {
   return (
     <span
       className={
@@ -171,9 +171,20 @@ export function Badge({ status }: { status: string }) {
               : "warn")
       }
     >
-      {label(status.toLowerCase())}
+      {text ?? label(status.toLowerCase())}
     </span>
   );
+}
+
+export const processingStatusLabel = (status: string) =>
+  status === "REQUIRES_REVIEW" ? "Completed with issues" : label(status.toLowerCase());
+
+export function ProcessingBadge({ status }: { status: string }) {
+  return <Badge status={status} text={processingStatusLabel(status)} />;
+}
+
+export function ReviewBadge({ status }: { status: string }) {
+  return <Badge status={status} text={status === "follow_up" ? "Follow-up" : undefined} />;
 }
 
 export function Empty({

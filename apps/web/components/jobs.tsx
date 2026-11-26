@@ -32,7 +32,7 @@ import {
   display,
   date,
   api,
-  Badge,
+  ProcessingBadge,
   Empty,
   Json,
   Evidence,
@@ -84,7 +84,7 @@ export function Jobs({ version, action }: { version: number; action: Action }) {
                 <th>Document</th>
                 <th>Stage</th>
                 <th>Progress</th>
-                <th>Status</th>
+                <th>Processing status</th>
                 <th>Retries</th>
                 <th>Action</th>
               </tr>
@@ -109,7 +109,7 @@ export function Jobs({ version, action }: { version: number; action: Action }) {
                     <small>{job.progress}%</small>
                   </td>
                   <td>
-                    <Badge status={job.status} />
+                    <ProcessingBadge status={job.status} />
                   </td>
                   <td>{job.retries} / 3</td>
                   <td>

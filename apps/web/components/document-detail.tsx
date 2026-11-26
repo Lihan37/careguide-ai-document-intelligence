@@ -34,6 +34,8 @@ import {
   date,
   api,
   Badge,
+  ProcessingBadge,
+  ReviewBadge,
   Empty,
   Json,
   Evidence,
@@ -74,6 +76,7 @@ export function DocumentDetail({
   const [edit, setEdit] = useState<Record<string, string>>({});
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [lineJson, setLineJson] = useState("");
@@ -88,7 +91,7 @@ export function DocumentDetail({
         .then((data) => {
           if (alive) setDocument(data);
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => { if (alive) setError(e.message); });
     load();
     const timer = setInterval(load, 3000);
     return () => {
@@ -108,6 +111,25 @@ export function DocumentDetail({
   const activeJob = document.history.find((job) => ["QUEUED", "PROCESSING", "CANCELLING"].includes(job.status));
   const progressJob = activeJob ?? (!ready ? latestJob : undefined);
   const pendingCandidate = document.history.find((job) => job.candidate_status === "pending");
+  const hasBlockingIssues = document.issues.some(({ severity }) => ["FAILED", "REQUIRES_REVIEW"].includes(severity));
+  const reviewDisabled = !ready || reviewBusy || note.trim().length < 3;
+  const approvalDisabled = reviewDisabled || hasBlockingIssues || document.review_status === "approved";
+  const submitReview = async (decision: "approved" | "follow_up") => {
+    if (reviewDisabled || (decision === "approved" && approvalDisabled)) return;
+    setReviewBusy(true);
+    try {
+      await action(async () => {
+        const result = await api<{ review_status: string }>(`/api/reviews/${id}/resolve`, {
+          method: "POST",
+          body: JSON.stringify({ decision, note }),
+        });
+        setDocument((current) => current && { ...current, review_status: result.review_status });
+        setNote("");
+      }, decision === "approved" ? "Review approved. Validation evidence retained." : "Marked for follow-up");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
   const openCandidate = async (jobId: string) => {
     const request = ++candidateRequest.current;
     setTab("History");
@@ -135,7 +157,16 @@ export function DocumentDetail({
             · {document.sheet_count} sheets · {document.duration.toFixed(2)} sec
           </p>
         </div>
-        <Badge status={document.status} />
+        <dl className="document-status-pair" aria-label="Document statuses">
+          <div>
+            <dt>Processing status</dt>
+            <dd><ProcessingBadge status={document.status} /></dd>
+          </div>
+          <div>
+            <dt>Review status</dt>
+            <dd><ReviewBadge status={document.review_status} /></dd>
+          </div>
+        </dl>
         <a
           className="button secondary"
           href={API + `/api/documents/${id}/source`}
@@ -208,7 +239,6 @@ export function DocumentDetail({
                   {document.extraction_method} · uncalibrated field confidence
                 </p>
               </div>
-              <Badge status={document.review_status} />
             </div>
             {ready ? (
               <>
@@ -353,55 +383,32 @@ export function DocumentDetail({
                 : "Validation will run after extraction."}
             </div>
           )}
-          <div className="section-pad">
-            <h3>Review decision</h3>
-            <label>
-              Review note
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Explain your decision…"
-              />
-            </label>
-            <div className="button-row">
-              <button
-                className="button primary"
-                disabled={!ready || note.trim().length < 3}
-                onClick={() =>
-                  action(
-                    () =>
-                      api(`/api/reviews/${id}/resolve`, {
-                        method: "POST",
-                        body: JSON.stringify({ decision: "approved", note }),
-                      }),
-                    "Review approved. Validation evidence retained.",
-                  )
-                }
-              >
-                Approve result
-              </button>
-              <button
-                className="button secondary"
-                disabled={!ready || note.trim().length < 3}
-                onClick={() =>
-                  action(
-                    () =>
-                      api(`/api/reviews/${id}/resolve`, {
-                        method: "POST",
-                        body: JSON.stringify({ decision: "follow_up", note }),
-                      }),
-                    "Marked for follow-up",
-                  )
-                }
-              >
-                Mark for follow-up
-              </button>
+          {canReview && (
+            <div className="section-pad">
+              <h3>Review decision</h3>
+              <label>
+                Review note
+                <textarea
+                  value={note}
+                  disabled={reviewBusy}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Explain your decision…"
+                />
+              </label>
+              <div className="button-row">
+                <button className="button primary" disabled={approvalDisabled} onClick={() => submitReview("approved")}>
+                  Approve result
+                </button>
+                <button className="button secondary" disabled={reviewDisabled} onClick={() => submitReview("follow_up")}>
+                  Mark for follow-up
+                </button>
+              </div>
+              <p className="small-note">
+                {hasBlockingIssues && "Correct failed checks and missing required fields before approval. "}
+                Warnings stay visible after approval.
+              </p>
             </div>
-            <p className="small-note">
-              Approval requires correcting failed checks and missing required
-              fields. Warnings remain in the audit trail.
-            </p>
-          </div>
+          )}
         </section>
       )}
       {tab === "Corrections" && (
@@ -537,7 +544,7 @@ export function DocumentDetail({
           <h2>Processing history</h2>
           {document.history.map((job) => (
             <div className="history-row" key={job.id}>
-              <Badge status={job.status} />
+              <ProcessingBadge status={job.status} />
               <span>
                 {job.stage} · {job.progress}% · retry {job.retries}
               </span>

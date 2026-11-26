@@ -32,7 +32,7 @@ import {
   display,
   date,
   api,
-  Badge,
+  ProcessingBadge,
   Empty,
   Json,
   Evidence,
@@ -101,10 +101,10 @@ export function Dashboard({
       color: "blue",
     },
     {
-      name: "Needs attention",
+      name: "Processing exceptions",
       value: (data.statuses.REQUIRES_REVIEW || 0) + (data.statuses.FAILED || 0),
       Icon: AlertTriangle,
-      note: `${data.statuses.FAILED || 0} failed · ${data.statuses.REQUIRES_REVIEW || 0} require review`,
+      note: `${data.statuses.FAILED || 0} failed · ${data.statuses.REQUIRES_REVIEW || 0} completed with issues`,
       color: "amber",
     },
   ];
@@ -159,7 +159,7 @@ export function Dashboard({
                       {job.progress}% complete
                     </small>
                   </div>
-                  <Badge status={job.status} />
+                  <ProcessingBadge status={job.status} />
                 </Link>
               ))}
             </div>

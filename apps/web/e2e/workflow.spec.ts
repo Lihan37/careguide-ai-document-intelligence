@@ -211,6 +211,11 @@ test("real invoice upload, processing, validation, correction, search and compar
       exact: true,
     }),
   ).toBeVisible();
+  await page.getByLabel("Review note").fill("Browser test: unresolved arithmetic");
+  await expect(page.getByRole("button", { name: "Approve result" })).toBeDisabled();
+  const documentStatuses = page.locator(".document-status-pair");
+  await expect(documentStatuses.getByText("Completed with issues", { exact: true })).toBeVisible();
+  await expect(documentStatuses.getByText("Pending", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Corrections", exact: true }).click();
   await page.getByLabel("Correct Total", { exact: true }).fill("220.00");
   await page
@@ -228,6 +233,8 @@ test("real invoice upload, processing, validation, correction, search and compar
     .fill("Browser test: confirmed arithmetic and original extraction");
   await page.getByRole("button", { name: "Approve result" }).click();
   await expect(page.getByRole("status")).toContainText("Review approved");
+  await expect(documentStatuses.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(documentStatuses.getByText("Approved", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.getByLabel("Search documents").fill("CG-2026-002");
   await page.getByRole("button", { name: "Search", exact: true }).click();
@@ -328,8 +335,19 @@ test("valid invoice, duplicate warning, corrupt file retry and connected navigat
   await expect(
     page.getByText("Exact file checksum match", { exact: true }).first(),
   ).toBeVisible({ timeout: 45000 });
+  await page.getByLabel("Review note").fill("Browser test: acknowledged the duplicate warning");
+  await page.getByRole("button", { name: "Approve result" }).click();
+  await expect(page.getByRole("status")).toContainText("Review approved");
+  await page.reload();
+  const documentStatuses = page.locator(".document-status-pair");
+  await expect(documentStatuses.getByText("Completed with issues", { exact: true })).toBeVisible();
+  await expect(documentStatuses.getByText("Approved", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: /^Validation/ }).click();
+  await expect(page.getByText("Exact file checksum match", { exact: true }).first()).toBeVisible();
+  await page.getByLabel("Review note").fill("Browser test: already approved");
+  await expect(page.getByRole("button", { name: "Approve result" })).toBeDisabled();
   await uploadAndOpen("corrupted.pdf");
-  await expect(page.locator(".detail-summary .badge")).toHaveText("Failed", {
+  await expect(documentStatuses.getByText("Failed", { exact: true })).toBeVisible({
     timeout: 45000,
   });
   await page
@@ -342,7 +360,7 @@ test("valid invoice, duplicate warning, corrupt file retry and connected navigat
   await expect(page.getByText(/retry 1/).first()).toBeVisible({
     timeout: 45000,
   });
-  await expect(page.locator(".detail-summary .badge")).toHaveText("Failed", {
+  await expect(documentStatuses.getByText("Failed", { exact: true })).toBeVisible({
     timeout: 45000,
   });
   for (const name of [
@@ -356,6 +374,12 @@ test("valid invoice, duplicate warning, corrupt file retry and connected navigat
     await expect(
       page.getByRole("heading", { name, exact: true }),
     ).toBeVisible();
+    if (name === "Documents") {
+      const duplicate = page.getByRole("row").filter({ hasText: "duplicate.pdf" });
+      await expect(duplicate.getByText("Completed with issues", { exact: true })).toBeVisible();
+      await expect(duplicate.getByText("Approved", { exact: true })).toBeVisible();
+      await expect(duplicate.getByRole("link", { name: /^\d+ issues?$/ })).toBeVisible();
+    }
   }
   await page
     .getByRole("button", { name: "Check services", exact: true })

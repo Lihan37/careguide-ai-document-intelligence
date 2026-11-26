@@ -12,7 +12,6 @@ import {
   Search,
   ChartNoAxesCombined,
   FileText,
-  CheckCircle2,
   AlertTriangle,
   LoaderCircle,
   X,
@@ -34,7 +33,8 @@ import {
   display,
   date,
   api,
-  Badge,
+  ProcessingBadge,
+  ReviewBadge,
   Empty,
   Json,
   Evidence,
@@ -70,9 +70,10 @@ export function Table({
           <tr>
             <th>Document</th>
             <th>Supplier / invoice</th>
-            <th>Status</th>
+            <th>Processing status</th>
             <th>Uploaded</th>
-            <th>Review</th>
+            <th>Review status</th>
+            <th>Validation</th>
             {onDelete && <th>Actions</th>}
           </tr>
         </thead>
@@ -108,18 +109,17 @@ export function Table({
                 <small>{row.invoice_number || "—"}</small>
               </td>
               <td>
-                <Badge status={row.status} />
+                <ProcessingBadge status={row.status} />
               </td>
               <td className="muted">{date(row.uploaded_at)}</td>
+              <td><ReviewBadge status={row.review_status} /></td>
               <td>
                 {row.issue_count ? (
                   <Link href={"/documents/" + row.id} className="issue-link">
-                    {row.issue_count} issues
+                    {row.issue_count} {row.issue_count === 1 ? "issue" : "issues"}
                   </Link>
                 ) : row.status === "COMPLETED" ? (
-                  <span className="green">
-                    <CheckCircle2 size={16} /> Verified
-                  </span>
+                  <span className="green">No issues</span>
                 ) : (
                   "—"
                 )}
