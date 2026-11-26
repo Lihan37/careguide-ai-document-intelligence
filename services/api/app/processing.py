@@ -10,6 +10,7 @@ from functools import lru_cache
 import zipfile
 from pathlib import Path
 from datetime import date, datetime
+from decimal import Decimal
 from charset_normalizer import from_bytes
 from PIL import Image, ImageOps, ImageEnhance, ImageFilter, UnidentifiedImageError
 from .config import settings
@@ -190,7 +191,7 @@ def scalar(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()[:10]
     if isinstance(value, float):
-        return str(value)
+        return format(Decimal(str(value)), 'f')
     return value
 
 
@@ -252,21 +253,30 @@ def units(path: Path, extension: str):
             raise ProcessingError('Corrupt, oversized, or unsupported image.') from exc
     elif extension == '.xlsx':
         import openpyxl
-        book = openpyxl.load_workbook(path, read_only=True, data_only=True, keep_links=False)
-        formulas = openpyxl.load_workbook(path, read_only=True, data_only=False, keep_links=False)
-        try:
+        from contextlib import closing
+
+        with (closing(openpyxl.load_workbook(path, read_only=True, data_only=True, keep_links=False)) as book,
+              closing(openpyxl.load_workbook(path, read_only=True, data_only=False, keep_links=False)) as formulas):
             total_cells = 0
-            for sheet in book:
+            for sheet in book.worksheets:
                 dimension = (sheet.max_row or 0) * (sheet.max_column or 0)
-                total_cells += dimension
-                if total_cells > cfg.max_cells:
+                if total_cells + dimension > cfg.max_cells:
                     raise ProcessingError('Workbook cell limit exceeded')
-                rows = [[scalar(cell) for cell in row] for row in sheet.iter_rows(values_only=True)]
-                formula_cells = [{'row': c.row, 'column': c.column, 'formula': c.value, 'cached_value': rows[c.row - 1][c.column - 1]} for row in formulas[sheet.title] for c in row if c.data_type == 'f']
-                yield sheet_unit(sheet.title, rows, len(book.sheetnames), formula_cells)
-        finally:
-            book.close()
-            formulas.close()
+                rows, formula_cells, cell_formats = [], [], {}
+                for cached_row, formula_row in zip(sheet.iter_rows(), formulas[sheet.title].iter_rows(), strict=True):
+                    total_cells += len(cached_row)
+                    if total_cells > cfg.max_cells or len(rows) >= cfg.max_cells:
+                        raise ProcessingError('Workbook cell limit exceeded')
+                    values = [scalar(cell.value) for cell in cached_row]
+                    rows.append(values)
+                    for cache, cell, value in zip(cached_row, formula_row, values, strict=True):
+                        if cell.data_type == 'f':
+                            formula = cell.value if isinstance(cell.value, str) else getattr(cell.value, 'text', None)
+                            formula_cells.append({'row': cell.row, 'column': cell.column,
+                                                  'formula': formula, 'cached_value': value})
+                        if value is not None and cache.number_format not in (None, 'General'):
+                            cell_formats[cache.coordinate] = cache.number_format
+                yield sheet_unit(sheet.title, rows, len(book.worksheets), formula_cells) | {'cell_formats': cell_formats}
     elif extension == '.xls':
         import xlrd
         book = xlrd.open_workbook(path, on_demand=True)

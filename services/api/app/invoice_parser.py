@@ -21,14 +21,15 @@ LABELS = {
     'issue date': 'invoice_date', 'date issued': 'invoice_date', 'date': 'invoice_date',
     'supplier name': 'supplier_name', 'supplier': 'supplier_name',
     'bill from': 'supplier_name', 'billed from': 'supplier_name',
-    'vendor': 'supplier_name', 'sold by': 'supplier_name',
+    'vendor': 'supplier_name', 'sold by': 'supplier_name', 'seller': 'supplier_name', 'seller name': 'supplier_name',
     'customer name': 'customer_name', 'customer': 'customer_name',
     'bill to': 'customer_name', 'billed to': 'customer_name', 'sold to': 'customer_name',
+    'buyer': 'customer_name', 'buyer name': 'customer_name',
     'sub total': 'subtotal', 'subtotal': 'subtotal',
     'vat': 'tax', 'tax': 'tax', 'tax amount': 'tax', 'vat amount': 'tax',
     'sales tax': 'tax', 'sales tax amount': 'tax',
     'gst': 'tax', 'gst amount': 'tax',
-    'grand total': 'total', 'total amount due': 'total', 'total amount': 'total', 'total': 'total',
+    'grand total': 'total', 'total amount due': 'total', 'amount due': 'total', 'total amount': 'total', 'total': 'total',
     'currency': 'currency', 'discount': 'discount', 'shipping': 'shipping',
     'delivery & handling': 'shipping', 'shipping & handling': 'shipping',
     'credit': 'credit', 'due date': '_due_date',
@@ -39,11 +40,11 @@ MONETARY = {'subtotal', 'tax', 'total', 'discount', 'shipping', 'credit'}
 CODES = set('AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XOF XPF YER ZAR ZMW ZWL'.split())
 TABLE_LABELS = {
     'description': 'description', 'itemdescription': 'description', 'item': 'description',
-    'product': 'description', 'details': 'description',
+    'product': 'description', 'details': 'description', 'itemname': 'description', 'productservice': 'description',
     'qty': 'quantity', 'quantity': 'quantity',
     'unitprice': 'unit_price', 'price': 'unit_price', 'rate': 'unit_price',
     'amount': 'line_amount', 'lineamount': 'line_amount',
-    'linetotal': 'line_amount', 'total': 'line_amount',
+    'linetotal': 'line_amount', 'extendedamount': 'line_amount', 'total': 'line_amount',
     'tax': 'tax_amount', 'vat': 'tax_amount', 'taxamount': 'tax_amount',
     'salestax': 'tax_amount', 'gst': 'tax_amount', 'gstamount': 'tax_amount',
     'vatamount': 'tax_amount', 'salestaxamount': 'tax_amount',
@@ -51,6 +52,7 @@ TABLE_LABELS = {
 
 MONEY_LABEL_ANNOTATION = re.compile(r'^(?P<label>[a-z][a-z_ &]*?)\s*\((?P<note>[^()]{1,100})\)(?=\s|:|$)', re.IGNORECASE)
 PARTY_LABEL_PAIR = re.compile(r'^(?P<left>[a-z ]+?)\s*/\s*(?P<right>[a-z]+)(?=\s|:|$)', re.IGNORECASE)
+TABLE_CURRENCY_QUALIFIER = re.compile(r'\s*\(([A-Za-z]{3})\)\s*$|\s+([A-Z]{3})\s*$')
 
 
 def currencies(value):
@@ -181,17 +183,25 @@ def visual_rows(unit):
     return result
 
 
-def table_header(cells):
+def header_currency(cell):
+    match = TABLE_CURRENCY_QUALIFIER.search(cell)
+    if match and (code := (match[1] or match[2]).upper()) in CODES:
+        return cell[:match.start()], code
+    return cell, None
+
+
+def table_header(cells, *, minimum_numeric_columns=2):
     columns = []
     for i, cell in enumerate(cells):
+        cell, _ = header_currency(str(cell))
         name = TABLE_LABELS.get(key(cell))
-        field, value = label_pair(str(cell))
+        field, value = label_pair(cell)
         if name is None and field == 'tax' and not value:
             name = 'tax_amount'
         if name is not None:
             columns.append((i, name))
     fields = {field for _, field in columns}
-    return columns if 'description' in fields and len(fields - {'description'}) >= 2 else []
+    return columns if 'description' in fields and len(fields - {'description'}) >= minimum_numeric_columns else []
 
 
 def is_summary(text):
@@ -200,13 +210,15 @@ def is_summary(text):
 
 
 def extract_invoice(source_units):
+    from .spreadsheet_invoice import parse_sheet
+
     candidates, item_rows, issues = {}, [], []
 
     def source(unit, excerpt, **extra):
         return {k: unit[k] for k in ('document_id', 'page', 'sheet', 'method', 'coordinate_space', 'ocr_confidence') if k in unit} | {'excerpt': excerpt, 'confidence': None, 'confidence_basis': 'deterministic label/table match; uncalibrated'} | extra
 
     def offer(field, raw, reference):
-        if field is None or field.startswith('_') or raw is None or str(raw).strip() == '':
+        if field is None or field.startswith('_') or ((raw is None or str(raw).strip() == '') and 'formula' not in reference):
             return
         candidates.setdefault(field, []).append((raw, reference))
         if field in MONETARY:
@@ -219,7 +231,7 @@ def extract_invoice(source_units):
             if field == 'description':
                 parsed[field] = str(raw).strip() or None
             else:
-                parsed[field] = number(raw)
+                parsed[field] = None if references.get(field, {}).get('percentage') else number(raw)
                 if parsed[field] is None and raw is not None and str(raw).strip():
                     issues.append({'rule_id': f'invalid_line_{len(item_rows) + 1}_{field}', 'severity': 'REQUIRES_REVIEW', 'explanation': 'Invalid observed line value; inspect original table evidence', 'actual': str(raw)})
         if not parsed.get('description'):
@@ -232,6 +244,9 @@ def extract_invoice(source_units):
         item_rows.append((line, references))
 
     for unit in source_units:
+        if 'rows' in unit:
+            parse_sheet(unit, source, offer, item, issues)
+            continue
         lines = [line.strip() for line in unit['text'].splitlines() if line.strip()]
         rows = visual_rows(unit)
         # Prefer coordinates for PDF labels: adjacent values or aligned values below.
@@ -312,29 +327,7 @@ def extract_invoice(source_units):
                 item(values, refs)
                 geometry_items = True
 
-        # Canonical spreadsheet header/data record (existing supported workflow).
-        sheet_rows = unit.get('rows', [])
-        if sheet_rows:
-            headers = {}
-            for i, value in enumerate(sheet_rows[0]):
-                if key(value) in ALIASES:
-                    headers[i] = ALIASES[key(value)]
-                    continue
-                field, inline = label_pair(str(value))
-                if field and not inline:
-                    headers[i] = field
-            if len(headers) >= 3 and len(sheet_rows) > 1:
-                for column, field in headers.items():
-                    raw = sheet_rows[1][column] if column < len(sheet_rows[1]) else None
-                    offer(field, raw, source(unit, str(raw), row=2, column=column + 1))
-            table_columns = table_header([str(value) for value in sheet_rows[0]])
-            if table_columns:
-                for row_index, values in enumerate(sheet_rows[1:], 2):
-                    if values and is_summary(str(values[0])):
-                        break
-                    item({name: values[col] if col < len(values) else None for col, name in table_columns}, {name: source(unit, str(values[col]), row=row_index, column=col + 1) for col, name in table_columns if col < len(values)})
-
-        if geometry_items or sheet_rows:
+        if geometry_items:
             continue
         # Delimited and whitespace tables, including PDF text with one cell per line.
         active, index = [], 0
@@ -392,7 +385,7 @@ def extract_invoice(source_units):
         values = {}
         invalid = []
         for raw, reference in observed:
-            value = normalized(field, raw)
+            value = None if reference.get('percentage') and field in MONETARY else normalized(field, raw)
             try:
                 if value is not None:
                     value = Invoice.model_validate({field: value}).model_dump(mode='json')[field]
@@ -413,7 +406,13 @@ def extract_invoice(source_units):
         else:
             data[field] = None
             evidence[field] = invalid[0][1]
-            issues.append({'rule_id': 'invalid_' + field, 'severity': 'REQUIRES_REVIEW', 'explanation': 'Observed value is invalid or ambiguous; inspect original evidence', 'actual': str(invalid[0][0])})
+            raw, reference = invalid[0]
+            if 'formula' in reference and raw is None:
+                issues.append({'rule_id': 'uncached_formula_' + field, 'severity': 'REQUIRES_REVIEW',
+                               'explanation': 'Formula has no cached result. Inspect the original workbook.',
+                               'sheet': reference['sheet'], 'row': reference['row'], 'column': reference['column']})
+            else:
+                issues.append({'rule_id': 'invalid_' + field, 'severity': 'REQUIRES_REVIEW', 'explanation': 'Observed value is invalid or ambiguous; inspect original evidence', 'actual': str(raw)})
     data['line_items'] = [line.model_dump(mode='json') for line, _ in item_rows]
     if item_rows:
         evidence['line_items'] = {'confidence': None, 'confidence_basis': 'observed table cells; uncalibrated', 'items': [references for _, references in item_rows]}
