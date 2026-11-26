@@ -18,9 +18,9 @@ LABELS = {
     'invoice number': 'invoice_number', 'invoice no': 'invoice_number',
     'invoice #': 'invoice_number', 'invoice id': 'invoice_number',
     'invoice': 'invoice_number', 'invoice date': 'invoice_date',
-    'issue date': 'invoice_date', 'date issued': 'invoice_date', 'date': 'invoice_date',
+    'issue date': 'invoice_date', 'date issued': 'invoice_date', 'date of issue': 'invoice_date', 'date': 'invoice_date',
     'supplier name': 'supplier_name', 'supplier': 'supplier_name',
-    'bill from': 'supplier_name', 'billed from': 'supplier_name',
+    'bill from': 'supplier_name', 'billed from': 'supplier_name', 'issued by': 'supplier_name',
     'vendor': 'supplier_name', 'sold by': 'supplier_name', 'seller': 'supplier_name', 'seller name': 'supplier_name',
     'customer name': 'customer_name', 'customer': 'customer_name',
     'bill to': 'customer_name', 'billed to': 'customer_name', 'sold to': 'customer_name',
@@ -32,10 +32,11 @@ LABELS = {
     'grand total': 'total', 'total amount due': 'total', 'amount due': 'total', 'total amount': 'total', 'total': 'total',
     'currency': 'currency', 'discount': 'discount', 'shipping': 'shipping',
     'delivery & handling': 'shipping', 'shipping & handling': 'shipping',
-    'credit': 'credit', 'due date': '_due_date',
+    'credit': 'credit', 'due date': '_due_date', 'payment due': '_due_date',
 }
 ALIASES = {key(label): field for label, field in LABELS.items()}
 MONETARY = {'subtotal', 'tax', 'total', 'discount', 'shipping', 'credit'}
+PARTY_FIELDS = {'supplier_name', 'customer_name'}
 # Currency codes are recognized only when printed explicitly. Ambiguous '$' is not USD.
 CODES = set('AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XOF XPF YER ZAR ZMW ZWL'.split())
 TABLE_LABELS = {
@@ -51,7 +52,11 @@ TABLE_LABELS = {
 }
 
 MONEY_LABEL_ANNOTATION = re.compile(r'^(?P<label>[a-z][a-z_ &]*?)\s*\((?P<note>[^()]{1,100})\)(?=\s|:|$)', re.IGNORECASE)
-PARTY_LABEL_PAIR = re.compile(r'^(?P<left>[a-z ]+?)\s*/\s*(?P<right>[a-z]+)(?=\s|:|$)', re.IGNORECASE)
+PARTY_ALIASES = re.compile(
+    r'^\s*(' + '|'.join(r'[\s_]+'.join(map(re.escape, label.split())) for label in sorted(LABELS, key=len, reverse=True)
+                        if LABELS[label] in PARTY_FIELDS) + r')(?=\s|:|$)',
+    re.IGNORECASE,
+)
 TABLE_CURRENCY_QUALIFIER = re.compile(r'\s*\(([A-Za-z]{3})\)\s*$|\s+([A-Z]{3})\s*$')
 
 
@@ -114,6 +119,17 @@ def invoice_date(value):
     return None
 
 
+def compound_party_label(text):
+    left, slash, right = text.partition('/')
+    field = ALIASES.get(key(left)) if slash and ':' not in left else None
+    if field not in PARTY_FIELDS:
+        return None
+    alias = PARTY_ALIASES.match(right)
+    if not alias or ALIASES[key(alias[1])] != field:
+        return None, ''
+    return field, right[alias.end():].strip().removeprefix(':').strip()
+
+
 def label_pair(text):
     text = text.strip()
     # Titles are not field/value pairs. In particular, 'INVOICE' is not tax.
@@ -122,11 +138,9 @@ def label_pair(text):
     annotation = MONEY_LABEL_ANNOTATION.match(text)
     if annotation and ALIASES.get(key(annotation['label'])) in MONETARY and number(annotation['note']) is None:
         text = annotation['label'].rstrip() + text[annotation.end():]
-    pair = PARTY_LABEL_PAIR.match(text)
-    if pair:
-        name = ALIASES.get(key(pair['left']))
-        if name in {'supplier_name', 'customer_name'} and name == ALIASES.get(key(pair['right'])):
-            text = pair['left'].rstrip() + text[pair.end():]
+    pair = compound_party_label(text)
+    if pair is not None:
+        return pair
     if ':' in text:
         label, value = text.split(':', 1)
         if key(label) in ALIASES:
@@ -155,7 +169,40 @@ def normalized(field, value):
         return None
     if field == 'invoice_number' and not re.fullmatch(r'[\w][\w./-]*', text):
         return None
+    if field in PARTY_FIELDS:
+        heading = compound_party_label(text)
+        if text.startswith('/') or not any(char.isalnum() for char in text) or (heading is not None and not heading[1]):
+            return None
     return text
+
+
+def join_party_headings(cells):
+    """Rejoin a party heading when spacing split its slash or alias into another cell."""
+    joined = []
+    index = 0
+    while index < len(cells):
+        cell = cells[index]
+        text = cell['text']
+        if ALIASES.get(key(text.rstrip(' /'))) in PARTY_FIELDS:
+            for end in range(index + 1, min(index + 3, len(cells))):
+                previous = cells[end - 1]['bbox']
+                bbox = cells[end]['bbox']
+                if bbox[0] - previous[2] > max(10, (previous[3] - previous[1]) * 2.5):
+                    break
+                following = cells[end]['text']
+                if end == index + 1 and not (text.endswith('/') or following.startswith('/')):
+                    break
+                text += ' ' + following
+                pair = compound_party_label(text)
+                if pair and pair[0] is not None:
+                    first_bbox = cell['bbox']
+                    cell = {'text': text, 'bbox': [first_bbox[0], min(first_bbox[1], bbox[1]),
+                                                   bbox[2], max(first_bbox[3], bbox[3])]}
+                    index = end
+                    break
+        joined.append(cell)
+        index += 1
+    return joined
 
 
 def visual_rows(unit):
@@ -179,7 +226,7 @@ def visual_rows(unit):
                 cell = cells[-1]
                 cell['text'] += ' ' + word['text']
                 cell['bbox'] = [min(cell['bbox'][0], x0), min(cell['bbox'][1], y0), max(cell['bbox'][2], x1), max(cell['bbox'][3], y1)]
-        result.append({'cells': cells, 'center': row['center']})
+        result.append({'cells': join_party_headings(cells), 'center': row['center']})
     return result
 
 
@@ -281,7 +328,7 @@ def extract_invoice(source_units):
             if field and value:
                 # A flattened row can concatenate two labels, such as Supplier and Customer.
                 nested_label, nested_value = label_pair(value)
-                if not rows or not (nested_label and not nested_value) or ':' in line:
+                if not (nested_label and not nested_value) or ':' in line or (not rows and field not in PARTY_FIELDS):
                     offer(field, value, source(unit, line))
             elif field and not rows and (index == 0 or not label_pair(lines[index - 1])[0] or label_pair(lines[index - 1])[1]):
                 labels = []

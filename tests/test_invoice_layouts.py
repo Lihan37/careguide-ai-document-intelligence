@@ -122,6 +122,78 @@ Total Amount Due: USD 41.50''')
     assert not issues and not validate(invoice)
 
 
+@pytest.mark.parametrize(('layout', 'supplier_label', 'customer_label', 'date_label'), [
+    ('below', 'SUPPLIER / ISSUED BY', 'CUSTOMER / BILL TO', 'Date of Issue'),
+    ('split', 'Seller / Bill From', 'Buyer / Bill To', 'Invoice Date'),
+    ('inline', 'Issued By / Vendor', 'Bill To / Customer', 'Issue Date'),
+])
+def test_two_page_pdf_resolves_compound_roles_and_issue_date(tmp_path, layout, supplier_label, customer_label, date_label):
+    path = tmp_path / 'positioned.pdf'
+    parties = [(44, supplier_label, 'Rivermark Ltd.'), (330, customer_label, 'Cedar Demo')]
+    with pymupdf.open() as pdf:
+        first = pdf.new_page()
+        first.insert_text((44, 70), 'Invoice No: REG-201')
+        first.insert_text((44, 100), f'{date_label}: 2026-09-14')
+        first.insert_text((44, 130), 'Payment due: 2026-10-15')
+        # Insert the party boxes in reverse order to exercise coordinates and text fallbacks.
+        for x, heading, name in reversed(parties):
+            if layout == 'inline':
+                first.insert_text((x, 180), f'{heading}: {name}')
+            else:
+                if layout == 'split':
+                    left, right = heading.split(' / ')
+                    first.insert_text((x, 180), left)
+                    slash = x + pymupdf.get_text_length(left, fontsize=11) + 14
+                    first.insert_text((slash, 180), '/')
+                    first.insert_text((slash + 18, 180), right)
+                else:
+                    first.insert_text((x, 180), heading)
+                first.insert_text((x, 206), name)
+        second = pdf.new_page()
+        for y, cells in [
+            (70, [(44, 'Description'), (310, 'Qty'), (370, 'Unit Price'), (480, 'Amount')]),
+            (105, [(44, 'Network survey'), (310, '2'), (370, '15.00'), (480, '30.00')]),
+            (135, [(44, 'Service call'), (310, '1'), (370, '20.00'), (480, '20.00')]),
+            (205, [(310, 'Subtotal'), (480, 'USD 50.00')]),
+            (230, [(310, 'Discount'), (480, 'USD -5.00')]),
+            (255, [(310, 'Shipping'), (480, 'USD 3.00')]),
+            (280, [(310, 'VAT'), (480, 'USD 4.50')]),
+            (305, [(310, 'Grand Total'), (480, 'USD 52.50')]),
+        ]:
+            for x, text in cells:
+                second.insert_text((x, y), text)
+        pdf.save(path)
+
+    invoice, evidence, issues = demo_extract(list(units(path, '.pdf')))
+    assert invoice.invoice_date.isoformat() == '2026-09-14'
+    assert invoice.supplier_name == 'Rivermark Ltd.' and invoice.customer_name == 'Cedar Demo'
+    assert invoice.discount == Decimal('-5.00') and invoice.total == Decimal('52.50')
+    assert len(invoice.line_items) == 2 and invoice.line_items[0].line_amount == Decimal('30.00')
+    for field in ('invoice_date', 'supplier_name', 'customer_name'):
+        assert evidence[field]['page'] == 1 and evidence[field]['bbox']
+    if layout != 'inline':
+        assert evidence['supplier_name']['label_bbox'][1] < evidence['supplier_name']['bbox'][1]
+    assert evidence['total']['page'] == 2
+    assert all(row['line_amount']['page'] == 2 for row in evidence['line_items']['items'])
+    assert not issues and not validate(invoice)
+
+
+def test_missing_party_names_and_issue_date_stay_null(tmp_path):
+    path = tmp_path / 'headings-only.pdf'
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        page.insert_text((44, 70), 'Date of Issue')
+        page.insert_text((44, 100), 'Payment due: 2026-10-15')
+        page.insert_text((44, 180), 'Supplier / Issued By')
+        page.insert_text((330, 180), 'Customer / Bill To')
+        pdf.save(path)
+    invoice, _, issues = demo_extract(list(units(path, '.pdf')))
+    assert invoice.invoice_date is None and invoice.supplier_name is None and invoice.customer_name is None
+    assert not issues
+    text, _, _ = parse('Supplier / Issued By Customer / Bill To')
+    assert text.supplier_name is None and text.customer_name is None
+
+
 @pytest.mark.parametrize(('printed', 'expected'), [
     ('BDT 8,500.00', '8500.00'), ('1.234,56 EUR', '1234.56'),
     ('GBP 1 234.50', '1234.50'), ('(USD 20.00)', '-20.00'),
