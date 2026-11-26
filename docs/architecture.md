@@ -50,7 +50,7 @@ Uploads retain environment, automation kind and run ID in existing audit JSON, s
 
 The default local executor runs one separate process so OCR and parsing do not block the request loop. Production-style Compose uses Redis and Celery with two workers, prefetch 1, late acknowledgments, soft/hard task limits, and container memory/CPU limits. Upload persists the document and job before dispatch. Dispatch failure is visible and manually retryable.
 
-The API closes its local executor on shutdown. Redis verified real enqueue and consumption, and the Windows Celery `solo` worker processed OCR without blocking API health requests. Both processes use the same Redis namespace and isolated PostgreSQL database. The Linux Compose worker uses prefork with configured time limits. The real integration run measured the Windows worker configuration.
+The API closes its local executor on shutdown. The verified Windows Celery `solo` worker consumed work from Redis and processed OCR while the API answered health requests. The Linux Compose setup uses a prefork worker. It shares the upload and FastEmbed cache volumes with the API and starts after the API applies migrations and passes readiness. The reviewer run exercised the Compose worker on a two-page scan. [Handoff verification](testing.md#reviewer-handoff-clean-clone)
 
 A conditional SQL update claims queued jobs. A document lock prevents concurrent retries or candidate acceptance while processing is active. Duplicate deliveries retain one job history entry. Expired leases can be marked failed through `POST /api/jobs/recover-stale`, then retried explicitly. Transient connection failures have a bounded Celery retry policy. Processing errors become terminal with up to three manual reprocess attempts.
 

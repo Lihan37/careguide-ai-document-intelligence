@@ -1,6 +1,6 @@
 # Tests, environment isolation and safe inspection
 
-The final verification used Windows, Python 3.13, Node 22.17, Pillow 13.0.0 and Tesseract 5.5.4 with English traineddata. **231 backend tests and five isolated Chromium workflows passed**, with zero failures and zero skips. The count includes real PostgreSQL, pgvector, Redis/Celery, and OCR. TypeScript and the production build passed. The separate Gemini API smoke test used the configured provider and synthetic inputs.
+See the [reviewer handoff run](#reviewer-handoff-clean-clone) for the current setup and regression evidence. The checked-in JSON and XML reports document earlier verification runs, including the separate live Gemini evaluation with synthetic inputs.
 
 ## Safe commands
 
@@ -70,7 +70,7 @@ docker stop $pg $redis
 Remove-Item Env:CAREGUIDE_TEST_POSTGRES_URL,Env:CAREGUIDE_TEST_REDIS_URL,Env:POSTGRES_PASSWORD
 ```
 
-For the full backend count, use `pytest -q` in the same configured environment before stopping those containers. The live integration test skips when either service URL is missing. It verifies migrations, persistence across an API restart, keyword and owner-filtered vector search, Redis queue delivery, page progress, duplicate deliveries, corrupt-file retry and simulated stale-lease recovery. Detailed metrics are saved privately under `data/verification/services-<UUID>/results.json`. The worker uses `solo` on Windows and prefork on Linux.
+To run all backend tests with the live infrastructure check, run `.\.venv\Scripts\python -m pytest -q` in the same configured environment before stopping those containers. Run this separately from frontend builds or other CPU-heavy checks. The live integration test skips when either service URL is missing. It verifies migrations, persistence across an API restart, keyword and owner-filtered vector search, Redis queue delivery, page progress, duplicate deliveries, corrupt-file retry and simulated stale-lease recovery. Detailed metrics are saved privately under `data/verification/services-<UUID>/results.json`. The native test worker uses `solo` on Windows and prefork on Linux.
 
 ### Ubuntu WSL alternative
 
@@ -89,6 +89,23 @@ Use this database, its own upload directory and matching Redis URL when launchin
 Run `.\.venv\Scripts\python scripts/benchmark_scaling.py` with OCR configured to reproduce the isolated PDF benchmark. Each fixture runs in a fresh Python process, and output stays under `data/evaluation/<UUID>/scaling-benchmark.json`.
 
 ## Clean Windows reproduction
+
+### Reviewer handoff clean clone
+
+A fresh clone from `710b62d` received the reviewer setup changes and used its own `.env`, account, database, upload directory and public model cache. The handoff ran on Windows with Python 3.13.5, Node.js 22.17.0, Docker Engine 28.3.0, and Compose v2.38.1. The Python lockfile and the npm dependency tree were installed into the clone. The checkout provisioned its own SQLite database with Alembic, and rerunning the initializer left `.env` intact.
+
+| Workflow | Evidence |
+| --- | --- |
+| SQLite Quick Start | Reviewer login, authenticated uploads, keyword search, two-page OCR using Windows Tesseract 5.5.4, and PDF/Excel comparison showing 220.00 versus 225.00. SQLite correctly reported semantic search unavailable. |
+| Docker Full Stack | Fresh Linux API and worker images, PostgreSQL 17.12, pgvector 0.8.7, Redis 7.4.9, English Tesseract 5.5.0, and a fresh FastEmbed model download. Celery processed the digital invoice and two-page scan. The scan passed Decimal validation at USD 176.00, with OCR evidence from both pages. |
+| Local semantic search | The paraphrase `equipment for digitizing paperwork` ranked the digital invoice first, with page 1 and exact source offsets. PostgreSQL stored six 384-dimensional chunks across the four sample uploads. Both searches were checked in Chromium, including opening the linked semantic result. The literal `Document Scanner Accessories` worked in keyword search on both databases. |
+| Backend automation | 288 passed, zero failed and zero skipped on the full sequential rerun (77.05 s), including PostgreSQL migrations, Redis/Celery and OCR. An initial run during concurrent frontend work hit HTTP 429 while polling an OCR retry and ended with 287 passed and one failed. |
+| Frontend automation | Six Chromium workflows passed with zero failures and zero skips. TypeScript and the production build passed. |
+| Gemini | The clean clone had no reviewer API key. The access command reported the missing configuration. The [recorded live Gemini evaluation](evaluation-report.md#gemini-invoice-extraction) is earlier evidence. |
+
+The host already had Git, Python, Node.js, Docker Desktop, native Tesseract and a Playwright Chromium cache. The initial fresh clone did not contain project dependencies, credentials, uploaded documents, databases or a model cache. Linux containers were run on Docker Desktop. A fresh Docker Desktop installation, native Linux and WSL service installation were outside this run.
+
+### Earlier release evidence
 
 A separate checkout of GitHub main was created from `e8fc3e3`. A fresh virtual environment installed the repository lockfile, `npm.cmd ci --prefix apps/web` installed the frontend lock, and `scripts/setup-local.ps1 -SkipInstall` generated a new private configuration and migrated fresh SQLite to `0002`. The audit changes were then applied to that checkout and the updated Pillow lock was installed. A previously absent verification directory exposed a stack-test setup issue. The fixed test creates its own reports directory.
 

@@ -10,20 +10,34 @@ Built against the supplied **Ai Engineer Task 1.3.pdf** (seven tasks, nine deliv
 
 ![Dashboard with real synthetic records](docs/dashboard-preview.png)
 
+## Reviewer handoff
+
+| Setup | What you can evaluate | What to install |
+| --- | --- | --- |
+| [SQLite Quick Start](#quick-start--windows-no-paid-services) | Digital PDFs and spreadsheets, deterministic extraction, keyword search, Decimal validation, comparisons, corrections, and audit history | Git, Python 3.13 and Node.js 22 |
+| [Full Stack with Docker](docs/setup-windows.md#postgresql-redis-and-celery-with-docker) | The same workflows plus PostgreSQL 17 with pgvector, 384-dimensional FastEmbed search, Redis 7 and Celery, and English OCR | Docker Desktop or Docker Engine with Compose v2, Node.js 22, and Python 3.13 to initialize the checkout |
+| [Optional native OCR](docs/setup-windows.md#ocr) and [Gemini](#optional-gemini-extraction) | Native Tesseract for scans, and optional Gemini extraction with your own API key | Tesseract 5 and language data for OCR. An eligible Google AI Studio project for Gemini. |
+
+The quick start and the complete Docker stack both work without Gemini. Use the [architecture](docs/architecture.md), [database schema](docs/database-schema.md), [evaluation report](docs/evaluation-report.md), [AI assistance disclosure](docs/ai-assistance-disclosure.md), and [assessment compliance matrix](docs/assessment-compliance.md) to review the implementation and evidence.
+
 ## Quick start — Windows, no paid services
 
-From the cloned repository root, with Python 3.13 and Node 22:
+In PowerShell, clone the repository and install the locked dependencies. The handoff targets Python 3.13 and Node.js 22. Next.js 16 requires Node.js 20.9 or later. [Next.js installation requirements](https://nextjs.org/docs/app/getting-started/installation)
 
 ```powershell
+git clone https://github.com/Lihan37/careguide-ai-document-intelligence.git
+Set-Location careguide-ai-document-intelligence
+python --version
+node --version
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-lock.txt
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local.ps1 -SkipInstall
 npm.cmd ci --prefix apps/web
 ```
 
-The script creates a private ignored development `.env` with random credentials and migrates SQLite. Committed synthetic fixtures are reused; they are generated only if missing. It does not seed uploaded documents. Read DEMO_PASSWORD in your editor; username is `reviewer`. It does not print secrets. No venv activation or permanent execution-policy change is required.
+The script generates a private, ignored `.env` with unique credentials and applies the SQLite migrations. The first API startup creates the `reviewer` account. Read `DEMO_PASSWORD` in your editor and use it to sign in. The workspace starts empty so you can upload the bundled synthetic fixtures yourself. Rerunning setup keeps your existing `.env`. No virtual environment activation or permanent execution-policy change is required.
 
-Run in separate terminals:
+Run these commands in separate PowerShell terminals from the repository root.
 
 ```powershell
 # Terminal 1 — API and local background processor
@@ -35,7 +49,9 @@ Run in separate terminals:
 npm.cmd run dev --prefix apps/web
 ```
 
-Open **http://localhost:3000**. API docs: **http://localhost:8000/docs**. Use localhost consistently for browser/API cookies. A production frontend build can be served with `npm.cmd run build --prefix apps/web`, then `npm.cmd run start --prefix apps/web`.
+Open **http://localhost:3000** and sign in. API readiness is at **http://localhost:8000/api/ready** and OpenAPI is at **http://localhost:8000/docs**. Use `localhost` for both frontend and API URLs. Stop each terminal with `Ctrl+C`. The SQLite database and uploads remain under ignored `data/`.
+
+For Linux or a Linux-container setup, see [the setup guide](docs/setup-windows.md#linux-or-wsl). For Windows OCR, follow the [Tesseract setup](docs/setup-windows.md#ocr), then upload `sample-data/ocr/multipage.pdf` and look for Tesseract evidence on both pages.
 
 ## Architecture and structure
 
@@ -101,7 +117,7 @@ Copy values deliberately from `.env.example`; do not overwrite the generated loc
 | CURRENCY_TOLERANCES | Optional JSON currency→decimal-string tolerance overrides |
 | NEXT_PUBLIC_API_URL / CORS_ORIGIN | Browser API URL and permitted frontend origin |
 
-The default quick start uses SQLite and a separate local worker process. For the verified PostgreSQL/Redis route, start Docker Desktop, launch infrastructure with `docker compose up -d postgres redis`, and follow [isolated stack verification](docs/testing.md#postgresql-redis-and-celery-verification). That procedure uses a fresh PostgreSQL database and private upload directory for each run. An Ubuntu WSL alternative is documented there. The normal SQLite database and its uploads can remain in place.
+The default quick start uses SQLite and a separate local processing subprocess. The [Docker Full Stack](docs/setup-windows.md#postgresql-redis-and-celery-with-docker) uses separate named volumes for PostgreSQL, private uploads, and the shared FastEmbed model cache. Open [`.env.example`](.env.example) for the safe defaults. The [database and worker tests](docs/testing.md#postgresql-redis-and-celery-verification) provision disposable resources.
 
 ### Local semantic search
 
@@ -115,10 +131,10 @@ Install the current Python lockfile and fetch the free English BGE model once fr
 
 For a separately configured PostgreSQL application, apply Alembic migrations to that database, set `EMBEDDINGS_ENABLED=true` and `EMBEDDING_PROVIDER=local`, then start the API and worker with the same cache path and settings. Processing new originals stores 384-dimensional vectors. Reprocessing an existing document indexes it with the selected model. Keyword results remain available independently. The local model runs offline after download. [FastEmbed model reference](https://qdrant.tech/documentation/embeddings/fastembed/)
 
-## Optional Gemini extraction on Windows
+## Optional Gemini extraction
 
-1. Install the updated Python lockfile with `.\.venv\Scripts\python -m pip install -r requirements-lock.txt`.
-2. In Google AI Studio, create a Gemini API key in an eligible unbilled project. Confirm that the model is available on the project’s free tier and leave billing disabled. Google lists Gemini 3.5 Flash-Lite on the free tier where available. [Create an API key](https://aistudio.google.com/apikey) · [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing)
+1. Complete the native SQLite quick start or the [native API/worker setup with Docker infrastructure](docs/setup-windows.md#native-api-and-worker-with-docker-infrastructure). Gemini reads the private root `.env` on the native Python runtime. The supplied API and worker containers run the deterministic path by default and do not mount that file.
+2. In Google AI Studio, create your own API key. Confirm model access and generation quota for the project before running the evaluation. Free-tier availability depends on the project, model, and region. Keep billing disabled for a no-cost review. [Create an API key](https://aistudio.google.com/apikey) · [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing)
 3. Open the existing project-root `.env` in your editor and add the key there. Use a literal value with no shell substitution. Keep the rest of the local settings.
 
    ```dotenv
@@ -142,7 +158,15 @@ Gemini receives extracted text from files routed to it. Use synthetic fixtures f
 npm.cmd run build --prefix apps/web
 ```
 
-Run `npm.cmd run test:e2e --prefix apps/web` after `npx.cmd --prefix apps/web playwright install chromium`. It starts its own API/frontend on separate loopback ports, generates temporary credentials, migrates an isolated database, verifies the server environment, and removes its temporary database/uploads/frontend copy after stopping servers. The normal app may remain running. Direct `npx playwright test` is intentionally rejected without runner context. [Testing and isolation](docs/testing.md); checked-in evaluation reports are historical snapshots.
+Run the browser and TypeScript checks from the repository root.
+
+```powershell
+npx.cmd --prefix apps/web playwright install chromium
+npm.cmd run test:e2e --prefix apps/web
+npm.cmd run typecheck --prefix apps/web
+```
+
+The browser runner starts its own API and frontend on separate loopback ports and creates temporary credentials, SQLite storage, and uploads. Your normal app may remain running. Use the [testing guide](docs/testing.md#safe-commands) for OCR prerequisites and the [disposable infrastructure commands](docs/testing.md#postgresql-redis-and-celery-verification) for the live PostgreSQL and Redis tests. The [clean-clone results](docs/testing.md#reviewer-handoff-clean-clone) document what was exercised during handoff.
 
 | Environment | Database and private files |
 | --- | --- |
@@ -165,7 +189,17 @@ The Windows OCR run used the project-local Tesseract 5.5.4 build. It processed 1
 
 ## Demonstration and submission
 
-Upload `sample-data/invoice.pdf` and `accounting.xlsx`, open **Processing Jobs**, then compare the results in **Document Comparison**. The totals differ by 5. Use `incorrect-total.pdf` to demonstrate a 250-to-220 audited correction and `ocr/multipage.pdf` for real OCR on both pages. Use the separate scratch-workspace instructions for the live AI and semantic-search segments. [7:40 recording plan](docs/demo-script.md)
+Open **Upload** and select these files from `sample-data/`. Follow progress in **Processing Jobs**, then open each document to inspect extraction, validation, evidence, and history.
+
+| Synthetic file or action | What to check |
+| --- | --- |
+| `layout-invoice.pdf` | Four line items and a BDT 9,350.00 total. |
+| `invoice.pdf` and `accounting.xlsx` | Compare both in **Document Comparison**. The totals differ by USD 5.00. |
+| `incorrect-total.pdf` | Review the total, correct it from 250.00 to 220.00, and inspect the audit trail. |
+| `ocr/multipage.pdf` | With OCR enabled, check Tesseract evidence on both image-only pages. |
+| Search separately after uploading `layout-invoice.pdf` | Try `Document Scanner Accessories` for keyword search and `equipment for digitizing paperwork` for semantic search. The semantic result links back to a source page. |
+
+The repository also contains [synthetic expected results](sample-data/ground-truth.json) and a [walkthrough recording plan](docs/demo-script.md).
 
 The technical handoff includes the [assessment matrix](docs/assessment-compliance.md), [clean Windows verification](docs/testing.md#clean-windows-reproduction), [evaluation report](docs/evaluation-report.md), and [AI prompts and disclosure](docs/ai-assistance-disclosure.md). Record the actual walkthrough and include it with those links when preparing the recruitment submission.
 

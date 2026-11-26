@@ -1,6 +1,6 @@
 # Windows setup
 
-Use PowerShell from `D:\Projects\CareGuide-AI-Assessment`. Python 3.13 and Node 22 were used in this run. Node must satisfy the installed Next.js requirement (at least 20.9). Install VS Code Python tooling if desired; select `.venv\Scripts\python.exe` as interpreter.
+Use PowerShell from the root of your clone. The reviewer setup targets Python 3.13 and Node.js 22. For Docker, use Docker Desktop in Linux container mode or Docker Engine with the Compose v2 plugin and `docker compose up --wait` support. Native OCR requires Tesseract 5 and traineddata for each configured language. Install VS Code Python tooling if desired and select `.venv\Scripts\python.exe` as the interpreter.
 
 ## Local mode without Docker or paid services
 
@@ -11,7 +11,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local.ps1 
 npm.cmd ci --prefix apps/web
 ```
 
-The script generates ignored `.env` with random local credentials only if it does not exist, applies migrations and generates synthetic fixtures. It does not print credentials. Read `DEMO_PASSWORD` privately in your editor; username defaults to `reviewer`. The command scopes execution policy to that one PowerShell process. It does not change the machine policy or require venv activation. If a managed machine forbids scripts entirely, follow the script's Python commands individually after creating `.env` privately from the example (set SQLite/local values).
+The script creates an ignored `.env` with unique local credentials, applies migrations, and generates synthetic fixtures if they are missing. Read `DEMO_PASSWORD` privately in your editor and use it with username `reviewer`. The command scopes execution policy to one PowerShell process. On a managed machine where PowerShell scripts are disabled, initialize with `.\.venv\Scripts\python scripts/init_reviewer_env.py`, create the data directory with `New-Item -ItemType Directory -Force data`, and run `.\.venv\Scripts\python -m alembic upgrade head`.
 
 Terminal 1:
 
@@ -98,29 +98,81 @@ Restart the API and any separate worker, then check OCR availability in Settings
 
 ## PostgreSQL, Redis and Celery with Docker
 
-Start Docker Desktop (Linux containers). In `.env`, retain the generated SESSION_SECRET and DEMO_PASSWORD, add a strong URL-safe POSTGRES_PASSWORD and set database/Redis/Celery variables as in `.env.example`. Compose overrides service hostnames inside containers.
+Start Docker Desktop in Linux container mode. With a fresh clone, run the following from the repository root. The initializer generates a separate URL-safe `POSTGRES_PASSWORD` for this checkout. When reusing a checkout with an existing `.env`, keep its current credentials and fill in `POSTGRES_PASSWORD` if empty. If a PostgreSQL volume already exists, use the password it was initialized with.
 
 ```powershell
-docker compose up --build -d
+docker compose version
+python scripts/init_reviewer_env.py
+npm.cmd ci --prefix apps/web
+```
+
+For the container-only backend, edit the ignored `.env` in your editor and set `EMBEDDINGS_ENABLED=true`, `EMBEDDING_PROVIDER=local`, `EXTRACTION_MODE=deterministic_demo`, and `OCR_LANGUAGE=eng`. Compose supplies its internal PostgreSQL, Redis, and file paths. Its PostgreSQL data and uploads are separate from the native SQLite workspace.
+
+```powershell
+docker compose build api worker
+docker compose run --rm --no-deps api python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='/app/data/embedding-models', threads=2)"
+docker compose up -d --wait
 docker compose ps
 npm.cmd run dev --prefix apps/web
 ```
 
-Compose starts database, broker, API and worker; the API runs Alembic migrations. For native API/worker with Docker infrastructure only:
+The initial build and model download need internet access. The local model runs offline after download. The API applies Alembic migrations, becomes ready, and creates the `reviewer` account. The worker starts after API readiness. Open **http://localhost:3000** and sign in with the `DEMO_PASSWORD` in the checkout's `.env`. In **Settings**, check PostgreSQL, Celery, OCR, and semantic availability. Upload `sample-data/layout-invoice.pdf` and `sample-data/ocr/multipage.pdf`, then use the search and source checks in the [reviewer walkthrough](../README.md#demonstration-and-submission).
 
-```powershell
-docker compose up -d postgres redis
-# Set DATABASE_URL and EXECUTION_MODE=celery in .env first.
-.\.venv\Scripts\python -m alembic upgrade head
-$env:PYTHONPATH = "$PWD\services\api;$PWD"
-.\.venv\Scripts\python -m celery -A worker.tasks:celery_app worker --pool=solo --concurrency=1 --loglevel=WARNING
+Use `docker compose logs --tail 100 api worker` for recent service logs, `docker compose exec worker tesseract --list-langs` for OCR language availability, and `docker compose exec redis redis-cli ping` for broker readiness. Stop the frontend with `Ctrl+C` and run `docker compose stop` to stop containers and retain their named volumes. The app remains local to loopback. Stop any other backend on port 8000 before starting. For a different API port, set `CAREGUIDE_API_PORT` in `.env` and `NEXT_PUBLIC_API_URL` to the corresponding `http://localhost:<port>` in the frontend terminal. Set `CAREGUIDE_POSTGRES_PORT` or `CAREGUIDE_REDIS_PORT` in `.env` if the corresponding host ports are occupied.
+
+### Native API and worker with Docker infrastructure
+
+Use this path to combine the full local stack with a native Gemini key. Complete the [Windows Quick Start](../README.md#quick-start--windows-no-paid-services) installation, stop the native API, and set up [native OCR](#ocr) if you will evaluate scans. Use a fresh clone or a separate Compose project if you already uploaded records with the container API, because PostgreSQL records store paths specific to the API runtime that wrote them. Start just the database and broker using `docker compose up -d --wait postgres redis`. In the private `.env`, set the following values. Replace the password placeholder with that checkout's generated `POSTGRES_PASSWORD`. Keep the database and broker host ports in sync with any `CAREGUIDE_*_PORT` overrides. Preserve your SQLite database and originals in their existing locations.
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://careguide:<your-generated-postgres-password>@localhost:5432/careguide
+REDIS_URL=redis://localhost:6379/0
+EXECUTION_MODE=celery
+STORAGE_DIR=./data/uploads-postgres
+EMBEDDINGS_ENABLED=true
+EMBEDDING_PROVIDER=local
 ```
 
-The verified Windows setup used Docker for PostgreSQL and Redis with a native Celery `solo` worker. Use a Linux worker for production. See the [isolated verification commands](testing.md#postgresql-redis-and-celery-verification).
+Initialize the database and cache from the repository root, then leave the API running in that terminal.
+
+```powershell
+.\.venv\Scripts\python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='data/embedding-models', threads=2)"
+.\.venv\Scripts\python -m alembic upgrade head
+.\.venv\Scripts\python -m uvicorn app.main:app --app-dir services/api --host 127.0.0.1 --port 8000
+```
+
+After the API becomes ready, start the worker in a second PowerShell terminal from the repository root.
+
+```powershell
+$env:PYTHONPATH = "$PWD\services\api;$PWD"
+.\.venv\Scripts\python -m celery -A worker.tasks:celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
+```
+
+In a third terminal, run `npm.cmd run dev --prefix apps/web`. Log in with the local reviewer credentials. Stop the frontend, worker and API with `Ctrl+C`, then run `docker compose stop postgres redis`. To return to SQLite, restore `DATABASE_URL=sqlite:///./data/careguide.db`, `STORAGE_DIR=./data/uploads`, `EXECUTION_MODE=local`, and `EMBEDDINGS_ENABLED=false` in `.env`, then restart the API and frontend. Each setup keeps its own database and uploads. Run one API/worker arrangement per workspace at a time because the container and native upload paths differ.
 
 Without Docker, use the Ubuntu WSL package and startup commands in [stack verification](testing.md#ubuntu-wsl-alternative). SQLite remains available for local keyword search and process-based OCR.
 
+## Linux or WSL
+
+With Git, Python 3.13 and Node.js 22 installed, run the following from a fresh clone for SQLite. Install Tesseract 5 and its English language data with your distro's package manager if testing scans. On Debian or Ubuntu, the package names are `tesseract-ocr` and `tesseract-ocr-eng`. Verify the runtime with `tesseract --version` and `tesseract --list-langs`. Set `TESSERACT_CMD=tesseract` and `OCR_LANGUAGE=eng` in the private `.env`.
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements-lock.txt
+.venv/bin/python scripts/init_reviewer_env.py
+mkdir -p data
+.venv/bin/python -m alembic upgrade head
+npm ci --prefix apps/web
+.venv/bin/python -m uvicorn app.main:app --app-dir services/api --host 127.0.0.1 --port 8000
+```
+
+In a second shell, run `npm run dev --prefix apps/web`. For the [Docker Full Stack](#postgresql-redis-and-celery-with-docker), run the same Compose commands and use `python3.13` and `npm` instead of `python` and `npm.cmd`. See [handoff verification](testing.md#reviewer-handoff-clean-clone) for the host and paths exercised.
+
+For a local production frontend build, set `NEXT_PUBLIC_API_URL` before building if you changed the API port. On Windows run `npm.cmd run build --prefix apps/web` followed by `npm.cmd run start --prefix apps/web`. On Linux use `npm` for both commands.
+
 ## Optional provider setup
+
+Use the [Gemini reviewer instructions](../README.md#optional-gemini-extraction) for Gemini specifically. Keep the following optional OpenAI-compatible configuration separate.
 
 No paid account is needed for deterministic demonstration. A provider API may charge per input/output token and embedding input. Set an API key only when ready to incur the provider's published usage charges. There is no built-in pricing calculator or spending cap. For a compatible local provider, costs can be zero beyond local compute, but its Responses structured-output API and embedding-dimensions support must be verified; compatibility is not claimed.
 
@@ -130,6 +182,7 @@ LLM_API_KEY=your-private-key
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4.1-mini
 EMBEDDINGS_ENABLED=true
+EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_DIMENSIONS=1536
 ```
@@ -139,9 +192,11 @@ Embeddings require PostgreSQL. Restart API and worker; reprocess documents to in
 ## Troubleshooting
 
 - API startup fails: ensure migrations ran and SESSION_SECRET has 32+ characters, DEMO_PASSWORD 12+. `.env` must use ordinary UTF-8; the setup script works with this tested settings version.
-- Browser cannot log in: check ports, use localhost for frontend/API, and verify the password against the configured user (not the DB password).
+- Browser cannot log in. Use `localhost` for both services, check the API readiness URL, and verify `DEMO_USERNAME` and `DEMO_PASSWORD` privately. On an existing native database, use `.\.venv\Scripts\python scripts/reset-password.py` to apply a deliberate password reset for the configured username.
 - Blank scans/failed OCR: verify the Tesseract executable path and language data. Inspect job errors; do not assume the Python package includes the binary.
 - Docker pipe/engine error: start Docker Desktop; otherwise use verified SQLite/local mode.
 - Jobs queued indefinitely: check configured worker and Redis. Failed dispatch is retryable. Recover expired jobs through Processing Jobs after the configured time limit.
+- Semantic search disabled. Check PostgreSQL, the pgvector migration, `EMBEDDINGS_ENABLED=true`, `EMBEDDING_PROVIDER=local`, and the shared cache. Upload a synthetic source to create embeddings. SQLite supports keyword search.
+- Gemini unavailable. Confirm the private root `.env` on the native API and worker, restart both, and run the model access check. Check current quota in Google AI Studio if generation is rate-limited.
 - Port in use: stop the existing service or update the frontend API URL/CORS origin together. Bind only loopback for this local assessment.
 - Package updates differ: use backend requirements-lock.txt and frontend npm ci. Linux Compose currently resolves compatible requirements.txt versions; freeze a platform-specific lock before production.
