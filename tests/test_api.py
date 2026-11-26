@@ -1,4 +1,5 @@
 from pathlib import Path
+import pymupdf
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Session, Document, Job, User
@@ -44,6 +45,37 @@ def test_correction_review_search_and_audit(client):
     assert client.post(f'/api/reviews/{id}/resolve', json={'decision': 'approved', 'note': 'Reviewed original source'}).status_code == 200
     assert client.get('/api/search', params={'q': 'CG-2026-002'}).json()['total'] >= 1
     assert client.get(f'/api/documents/{id}/source?page=1').headers['content-type'] == 'image/png'
+
+
+def test_signed_discount_correction_and_comparison(client):
+    def upload_discount_fixture(invoice_number):
+        with pymupdf.open() as pdf:
+            pdf.new_page().insert_text((40, 50), '\n'.join([
+                'Invoice Number: ' + invoice_number, 'Invoice Date: 2026-11-26',
+                'Supplier: Synthetic Discount Supplier', 'Customer: Synthetic Buyer', 'Currency: USD',
+                'Description | Qty | Unit Price | Amount', 'Inspection | 2 | 100.00 | 200.00',
+                'Subtotal: USD 200.00', 'Discount: USD 10.00', 'Tax: USD 20.00', 'Total: USD 210.00',
+            ]))
+            response = client.post('/api/documents/upload', files={'files': (invoice_number + '.pdf', pdf.tobytes(), 'application/pdf')})
+        assert response.status_code == 202
+        return response.json()['results'][0]['document_id']
+
+    first = upload_discount_fixture('DISCOUNT-REG-A')
+    second = upload_discount_fixture('DISCOUNT-REG-B')
+    before = client.get(f'/api/documents/{first}/extraction').json()
+    changed = client.patch(f'/api/documents/{first}/corrections', json={
+        'fields': {'discount': '-10.00'}, 'reason': 'Verify signed discount handling',
+    })
+    assert changed.status_code == 200
+    refreshed = client.get(f'/api/documents/{first}/validation').json()
+    assert refreshed == {'outcome': 'PASSED', 'issues': []}
+    after = client.get(f'/api/documents/{first}/extraction').json()
+    assert after['effective']['discount'] == '-10.00'
+    assert after['original'] == before['original'] and after['evidence'] == before['evidence']
+    comparison = client.post('/api/comparisons', json={'document_ids': [first, second]})
+    assert comparison.status_code == 201
+    discount = next(f for f in comparison.json()['results'][0]['fields'] if f['field'] == 'discount')
+    assert (discount['left'], discount['right'], discount['status']) == ('-10.00', '10.00', 'MATCHED')
 
 
 def test_failure_retry_idempotency(client):

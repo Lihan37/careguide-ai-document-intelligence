@@ -1,6 +1,6 @@
 from decimal import Decimal
 from .schemas import Invoice
-from .validation import normalize, tolerance
+from .validation import discount_magnitude, normalize, tolerance
 
 FIELDS = ['invoice_number', 'invoice_date', 'supplier_name', 'customer_name', 'subtotal', 'tax', 'total', 'currency', 'line_items']
 
@@ -22,12 +22,16 @@ def mapped_invoice(source, mapping, row=2):
 
 def compare(left, right, left_evidence=None, right_evidence=None):
     results = []
-    for field in FIELDS:
+    fields = [*FIELDS, 'discount'] if left.get('discount') is not None or right.get('discount') is not None else FIELDS
+    for field in fields:
         a, b, difference = left.get(field), right.get(field), None
         if a is None or b is None or (field == 'line_items' and (not a or not b)):
             status = 'MISSING'
-        elif field in {'subtotal', 'tax', 'total'}:
-            difference = Decimal(str(b)) - Decimal(str(a))
+        elif field in {'subtotal', 'tax', 'total', 'discount'}:
+            left_amount, right_amount = Decimal(str(a)), Decimal(str(b))
+            if field == 'discount':
+                left_amount, right_amount = discount_magnitude(left_amount), discount_magnitude(right_amount)
+            difference = right_amount - left_amount
             status = 'MATCHED' if left.get('currency') == right.get('currency') and abs(difference) <= tolerance(left.get('currency')) else 'MISMATCHED'
         elif field == 'line_items':
             status = 'MATCHED' if a == b else 'REQUIRES_REVIEW'
