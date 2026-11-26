@@ -37,8 +37,14 @@ LABELS = {
 ALIASES = {key(label): field for label, field in LABELS.items()}
 MONETARY = {'subtotal', 'tax', 'total', 'discount', 'shipping', 'credit'}
 PARTY_FIELDS = {'supplier_name', 'customer_name'}
-# Currency codes are recognized only when printed explicitly. Ambiguous '$' is not USD.
+# A bare dollar symbol does not identify a currency.
 CODES = set('AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XOF XPF YER ZAR ZMW ZWL'.split())
+QUALIFIED_CURRENCY = {
+    'US$': 'USD', 'CA$': 'CAD', 'AU$': 'AUD', 'A$': 'AUD', 'NZ$': 'NZD',
+    'HK$': 'HKD', 'SG$': 'SGD', 'S$': 'SGD', 'R$': 'BRL',
+    '€': 'EUR', '₹': 'INR', '৳': 'BDT',
+}
+CURRENCY_SYMBOL = re.compile(r'(?<![A-Za-z])(?:' + '|'.join(map(re.escape, QUALIFIED_CURRENCY)) + ')')
 TABLE_LABELS = {
     'description': 'description', 'itemdescription': 'description', 'item': 'description',
     'product': 'description', 'details': 'description', 'itemname': 'description', 'productservice': 'description',
@@ -73,7 +79,8 @@ def number(value):
         return None
     for code in currencies(text):
         text = re.sub(r'(?i)\b' + code + r'\b', '', text)
-    text = text.strip().lstrip('$€£৳₹').strip()
+    text = CURRENCY_SYMBOL.sub('', text)
+    text = text.strip().lstrip('$€£¥৳₹').strip()
     text = re.sub(r'^([+-])\s+', r'\1', text)
     negative = text.startswith('(') and text.endswith(')')
     if negative:
@@ -105,13 +112,14 @@ def number(value):
 
 
 def invoice_date(value):
-    text = str(value).strip()
+    text = ' '.join(str(value).split())
     if re.fullmatch(r'\d{1,2}[/-]\d{1,2}[/-]\d{4}', text):
         a, b, year = map(int, re.split(r'[/-]', text))
         if a <= 12 and b <= 12 and a != b:
             return None  # No silent locale assumption for ambiguous dates.
         text = f'{year}-{b if a > 12 else a:02d}-{a if a > 12 else b:02d}'
-    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%d-%b-%Y', '%B %d, %Y', '%b %d, %Y'):
+    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%d %b, %Y', '%d %B, %Y',
+                '%d-%b-%Y', '%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y'):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
