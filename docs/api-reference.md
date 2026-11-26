@@ -11,6 +11,8 @@ Base URL: `http://localhost:8000`. Interactive OpenAPI: `/docs`; machine schema:
 | GET | /api/documents | Paged document metadata; `q`, `status`, `file_type`, `sort=newest/oldest`, `page`, `page_size` |
 | GET | /api/documents/{id} | Metadata, raw/effective fields, evidence, issues, sources, jobs and audit |
 | GET | /api/documents/{id}/status | Document and latest job progress |
+| GET | /api/documents/{id}/deletion | Owner with reviewer/admin role. Returns filename, the saved comparison IDs, and whether processing or an inaccessible comparison blocks removal. |
+| DELETE | /api/documents/{id} | Owner with reviewer/admin role. Send `{"comparison_ids":[]}` or the exact IDs from the preview to explicitly remove those saved comparisons. Returns 409 if the dependencies changed or processing is active. |
 | GET | /api/documents/{id}/extraction | Original, corrections, effective values, evidence and extraction method |
 | GET | /api/documents/{id}/validation | PASSED/WARNING/FAILED/REQUIRES_REVIEW and rule details |
 | GET | /api/documents/{id}/source | Authenticated original download/inline PDF; optional `page=1` renders bounded PNG |
@@ -20,7 +22,7 @@ Base URL: `http://localhost:8000`. Interactive OpenAPI: `/docs`; machine schema:
 | PATCH | /api/documents/{id}/corrections | `{fields:{total:"220.00"},reason:"Source checked"}`; strict schema, audit old/new, revalidate |
 | GET | /api/jobs | Paged processing history (`page`, `page_size`) |
 | GET | /api/jobs/{id} | Status, stage, progress, counters, retries and error |
-| POST | /api/jobs/{id}/cancel | Cooperative cancellation of queued/active jobs |
+| POST | /api/jobs/{id}/cancel | Queued jobs cancel immediately. Running jobs report `CANCELLING` until the worker releases the source and acknowledges cancellation. |
 | POST | /api/jobs/recover-stale | Fail current owner's expired processing leases |
 | GET | /api/review-queue | Unapproved flagged documents; `q`, `page`, `page_size` |
 | POST | /api/reviews/{id}/resolve | `{decision:"approved" or "follow_up",note:"Evidence checked"}`; block approval on failed/required-field issues |
@@ -35,6 +37,8 @@ Base URL: `http://localhost:8000`. Interactive OpenAPI: `/docs`; machine schema:
 | GET | /api/health | API liveness |
 | GET | /api/environment | Environment/automation kind/run UUID only; no credentials or storage paths |
 | GET | /api/ready | Database/broker readiness; does not assert worker liveness |
+
+Document deletion commits its database transaction before cleaning up the original. The response includes `comparisons_deleted`, the `original` outcome (`removed`, `shared`, `missing`, or `retained`), and a `warning` when applicable. A file cleanup warning can accompany a successful database deletion.
 
 Comparison mappings example:
 

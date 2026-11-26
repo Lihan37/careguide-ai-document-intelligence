@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import closing, contextmanager
 from sqlalchemy import select, update, delete
 from .db import Session, Document, Job, SourceUnit, Audit, now
 from .config import settings
@@ -35,14 +36,38 @@ def dispatch(job_id):
         _pool.submit(run_job, job_id)
 
 
+@contextmanager
+def claimed_job(db, job_id):
+    document_id = db.scalar(select(Job.document_id).where(Job.id == job_id, Job.status == 'QUEUED'))
+    if document_id is None or lock_document(db, document_id) is None:
+        yield None
+        return
+    claimed = db.execute(update(Job).where(Job.id == job_id, Job.status == 'QUEUED').values(
+        status='PROCESSING', stage='Reading document', worker_active=True, updated_at=now()))
+    db.commit()
+    if claimed.rowcount != 1:
+        yield None  # Atomic claim prevents duplicate deliveries from doing work.
+        return
+    try:
+        yield db.get(Job, job_id)
+    finally:
+        db.rollback()
+        document = lock_document(db, document_id)
+        job = db.get(Job, job_id, populate_existing=True)
+        if job is not None:
+            if job.status == 'CANCELLING':
+                job.status, job.stage, job.updated_at = 'CANCELLED', 'Cancelled', now()
+                if document and not job.preserves_current:
+                    document.status = 'CANCELLED'
+            job.worker_active = False
+        db.commit()
+
+
 def run_job(job_id):
     started = time.monotonic()
-    with Session() as db:
-        claimed = db.execute(update(Job).where(Job.id == job_id, Job.status == 'QUEUED').values(status='PROCESSING', stage='Reading document', updated_at=now()))
-        db.commit()
-        if claimed.rowcount != 1:
-            return  # Atomic claim prevents duplicate deliveries from doing work.
-        job = db.get(Job, job_id)
+    with Session() as db, claimed_job(db, job_id) as job:
+        if job is None:
+            return
         try:
             document = processing_document(db, job)
             job.preserves_current = job.preserves_current or has_current_extraction(document)
@@ -58,27 +83,29 @@ def run_job(job_id):
                 db.execute(delete(SourceUnit).where(SourceUnit.document_id == document.id))
             db.commit()
             source = []
-            for position, unit in enumerate(units(Path(document.storage_path), document.file_type)):
-                db.refresh(job)
-                if job.status != 'PROCESSING':
-                    raise JobStopped()
-                if time.monotonic() - started > settings().job_timeout:
-                    raise TimeoutError('Document processing time limit exceeded')
-                unit['document_id'] = document.id
-                source.append(unit)
-                if not job.preserves_current:
-                    db.add(SourceUnit(document_id=document.id, position=position, data=unit))
-                if position == 0 and unit.get('pdf_normalization'):
-                    db.add(Audit(document_id=document.id, user_id=document.owner_id, action='pdf_normalized',
-                                 detail={'job_id': job.id, 'mode': unit['pdf_normalization'], 'page_count': unit['total'],
-                                         'original_sha256': document.checksum, 'authenticity_verified': False}))
-                job.pages_processed = position + 1
-                job.total_pages = unit['total']
-                job.progress = min(70, int(70 * (position + 1) / max(1, unit['total'])))
-                job.updated_at = now()
-                db.commit()
+            with closing(units(Path(document.storage_path), document.file_type)) as reader:
+                for position, unit in enumerate(reader):
+                    db.refresh(job)
+                    if job.status != 'PROCESSING':
+                        raise JobStopped()
+                    if time.monotonic() - started > settings().job_timeout:
+                        raise TimeoutError('Document processing time limit exceeded')
+                    unit['document_id'] = document.id
+                    source.append(unit)
+                    if not job.preserves_current:
+                        db.add(SourceUnit(document_id=document.id, position=position, data=unit))
+                    if position == 0 and unit.get('pdf_normalization'):
+                        db.add(Audit(document_id=document.id, user_id=document.owner_id, action='pdf_normalized',
+                                     detail={'job_id': job.id, 'mode': unit['pdf_normalization'], 'page_count': unit['total'],
+                                             'original_sha256': document.checksum, 'authenticity_verified': False}))
+                    job.pages_processed = position + 1
+                    job.total_pages = unit['total']
+                    job.progress = min(70, int(70 * (position + 1) / max(1, unit['total'])))
+                    job.updated_at = now()
+                    db.commit()
             if not source:
                 raise ValueError('No readable content found')
+            document = processing_document(db, job)
             job.progress, job.stage = 75, 'Structured extraction'
             db.commit()
             invoice, evidence, extraction_issues, method, usage = extract(source)
@@ -93,10 +120,9 @@ def run_job(job_id):
                     extraction_issues.append({'rule_id': 'ocr_review', 'severity': 'WARNING', 'page': unit['page'],
                                               'explanation': f'Check OCR text against the original on page {unit["page"]}.',
                                               'actual': confidence, 'expected': settings().ocr_review_threshold})
+            document = processing_document(db, job)
             if not job.preserves_current:
                 job.stage, job.progress = 'Indexing', 90
-                db.commit()
-            document = processing_document(db, job)
             raw = invoice.model_dump(mode='json')
             effective = effective_invoice(document, raw)
             issues = evaluated_issues(db, document, effective, extraction_issues)

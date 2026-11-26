@@ -95,7 +95,7 @@ export function Dashboard({
     },
     {
       name: "In processing",
-      value: (data.statuses.PROCESSING || 0) + (data.statuses.QUEUED || 0),
+      value: (data.statuses.PROCESSING || 0) + (data.statuses.QUEUED || 0) + (data.statuses.CANCELLING || 0),
       Icon: Activity,
       note: "Queued and active jobs",
       color: "blue",

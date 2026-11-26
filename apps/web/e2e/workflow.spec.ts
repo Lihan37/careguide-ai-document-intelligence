@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 
 const root = path.resolve(process.cwd(), "../..");
 const context = require('./context.cjs');
@@ -11,6 +12,77 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
   const identity = await response.json();
   expect(identity).toEqual({ environment: 'test', automation_kind: 'playwright', run_id: context.run_id });
+});
+
+test("document deletion confirms dependencies and preserves unrelated uploads", { tag: "@document-deletion" }, async ({ page }) => {
+  const targetName = "temporary-deletion-invoice.pdf";
+  const retainedName = "retained-deletion-check.xlsx";
+  const temporary = { name: targetName, mimeType: "application/pdf", buffer: readFileSync(path.join(root, "sample-data/layout-invoice.pdf")) };
+  const retained = { name: retainedName, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: readFileSync(path.join(root, "sample-data/accounting.xlsx")) };
+  await page.goto("/");
+  await page.getByLabel("Password", { exact: true }).fill(password!);
+  await page.getByRole("button", { name: "Sign in to workspace" }).click();
+  await page.getByRole("navigation").getByRole("link", { name: "Upload Documents", exact: true }).click();
+  await page.getByLabel("Choose documents").setInputFiles([temporary, retained]);
+  await page.getByRole("button", { name: "Upload 2 documents", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Open document", exact: true })).toHaveCount(2);
+
+  const docs = await (await page.request.get(`${apiUrl}/api/documents`)).json();
+  const targetId = docs.items.find((row: { filename: string }) => row.filename === targetName).id;
+  const retainedId = docs.items.find((row: { filename: string }) => row.filename === retainedName).id;
+  const targetUrl = `${apiUrl}/api/documents/${targetId}`;
+  const retainedUrl = `${apiUrl}/api/documents/${retainedId}`;
+  for (const endpoint of [targetUrl, retainedUrl]) {
+    await expect.poll(async () => (await (await page.request.get(`${endpoint}/status`)).json()).status,
+      { timeout: 30000 }).toMatch(/^(COMPLETED|REQUIRES_REVIEW)$/);
+  }
+  const comparison = await page.request.post(`${apiUrl}/api/comparisons`, { data: { document_ids: [targetId, retainedId] } });
+  expect(comparison.status()).toBe(201);
+  const comparisonUrl = `${apiUrl}/api/comparisons/${(await comparison.json()).id}`;
+  const retainedBefore = await (await page.request.get(retainedUrl)).json();
+
+  await page.getByRole("navigation").getByRole("link", { name: "Documents", exact: true }).click();
+  const row = page.getByRole("row").filter({ hasText: targetName });
+  await row.getByLabel(`Actions for ${targetName}`).click();
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete document?" });
+  await expect(dialog.getByText(targetName, { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/Deletion is permanent/)).toBeVisible();
+  await expect(dialog.locator("dl")).toContainText(/Dependent saved comparisons\s*1/);
+  await expect(dialog.getByText("Inactive", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect((await page.request.get(comparisonUrl)).status()).toBe(200);
+  await expect(row).toBeVisible();
+
+  await row.getByRole("link", { name: new RegExp(targetName) }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await dialog.getByRole("button", { name: "Delete document and comparisons", exact: true }).click();
+  await expect(page).toHaveURL(/\/documents$/);
+  await expect(page.getByRole("status")).toContainText("Document and 1 saved comparison deleted.");
+  await expect(row).toHaveCount(0);
+  await expect(page.getByRole("row").filter({ hasText: retainedName })).toBeVisible();
+  expect((await page.request.get(targetUrl)).status()).toBe(404);
+  expect((await page.request.get(comparisonUrl)).status()).toBe(404);
+  expect(await (await page.request.get(retainedUrl)).json()).toEqual(retainedBefore);
+
+  await page.getByRole("navigation").getByRole("link", { name: "Upload Documents", exact: true }).click();
+  await page.getByLabel("Choose documents").setInputFiles(temporary);
+  await page.getByRole("button", { name: "Upload 1 document", exact: true }).click();
+  const reuploaded = page.getByRole("link", { name: "Open document", exact: true });
+  await expect(reuploaded).toBeVisible();
+  const replacement = await reuploaded.getAttribute("href");
+  expect(replacement).not.toBe(`/documents/${targetId}`);
+  await expect.poll(async () => (await (await page.request.get(`${apiUrl}/api${replacement}/status`)).json()).status,
+    { timeout: 30000 }).toMatch(/^(COMPLETED|REQUIRES_REVIEW)$/);
+  await page.getByRole("navigation").getByRole("link", { name: "Documents", exact: true }).click();
+  await row.getByLabel(`Actions for ${targetName}`).click();
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await dialog.getByRole("button", { name: "Delete document", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Document deleted.");
+  await expect(row).toHaveCount(0);
+  expect((await page.request.get(retainedUrl)).ok()).toBeTruthy();
 });
 
 test("equivalent retry preserves the current extraction in the browser", async ({ page }) => {

@@ -50,6 +50,10 @@ class Correction(Strict):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class DocumentDeletion(Strict):
+    comparison_ids: list[str]
+
+
 class CandidateAcceptance(Strict):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=2000)]
 

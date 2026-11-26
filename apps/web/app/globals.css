@@ -337,6 +337,72 @@ progress::-webkit-progress-value {
   color: #52617a;
   border: 1px solid #dae2ed;
 }
+.button.danger {
+  background: #b42318;
+  border: 1px solid #b42318;
+  color: white;
+}
+.document-actions-cell {
+  width: 1%;
+}
+.document-row-actions > summary {
+  list-style: none;
+}
+.document-row-actions > summary::-webkit-details-marker {
+  display: none;
+}
+.document-row-actions > button {
+  margin-top: 6px;
+}
+.document-row-actions > button,
+.delete-document-trigger {
+  color: #b42318;
+}
+.document-delete-dialog {
+  width: min(480px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  margin: auto;
+  padding: 24px;
+  border: 1px solid #dae2ed;
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 16px 48px #19263d30;
+  color: inherit;
+}
+.document-delete-dialog::backdrop {
+  background: #19263d70;
+}
+.document-delete-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.document-delete-dialog p {
+  margin: 8px 0;
+}
+.delete-filename {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.delete-document-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  padding: 12px;
+  margin: 14px 0;
+  background: #f4f7fb;
+  border-radius: 6px;
+}
+.delete-document-status dd {
+  margin: 0;
+  font-weight: 600;
+}
+.delete-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
 .mode-banner {
   display: flex;
   align-items: center;

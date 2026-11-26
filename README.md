@@ -86,6 +86,14 @@ docker-compose.yml        PostgreSQL/pgvector, Redis, API and Linux OCR worker
 
 The API implements uploads, lists/details/status/extraction/validation/source, retries, corrections, jobs, search, comparisons, review and evaluation. See [full route reference](docs/api-reference.md) and generated OpenAPI. Originals remain private; all financial routes require authentication, ownership and appropriate reviewer authorization.
 
+### Delete a document
+
+On an existing local setup, apply `python -m alembic upgrade head` with the project interpreter against the active database before starting the updated API and workers. Stop processing before the upgrade. Docker setup applies migrations when the API starts.
+
+Reviewers and admins can delete their own documents one at a time. Open the row actions in **Documents**, or choose **Delete** in the document workspace. The confirmation shows the filename, active processing state, and number of saved comparisons that will be removed. If there are dependent comparisons, choose **Delete document and comparisons** to remove those snapshots as well. The other documents and their review history stay in place.
+
+For a queued or running document, cancel the job in **Processing Jobs** and wait until it finishes cancelling before retrying deletion. An interrupted worker that cannot confirm it stopped can leave deletion blocked for safety. Deletion is permanent and removes the selected document's extraction, corrections, job and audit history, and search entries. The private original is cleaned up after the database commits and only when no retained document references it. If it is retained, the result explains why.
+
 ## Environment and services
 
 Copy values deliberately from `.env.example`; do not overwrite the generated local credentials accidentally.

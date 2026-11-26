@@ -25,6 +25,7 @@ import { Dashboard } from "./dashboard";
 import { Upload } from "./upload";
 import { DocumentList } from "./document-list";
 import { DocumentDetail } from "./document-detail";
+import { DocumentDeleteDialog, DeleteTarget } from "./document-delete-dialog";
 import { Jobs } from "./jobs";
 import { ComparisonPage } from "./comparison";
 import { SettingsPage } from "./settings";
@@ -34,7 +35,7 @@ import { useEffect, useRef, useState } from "react";
 
 import Link from "next/link";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import {
   LayoutDashboard,
@@ -69,8 +70,11 @@ const nav = [
   ["/settings", "Settings", Settings],
 ] as const;
 
+const deletionNoticeKey = "careguide-document-deletion-notice";
+
 export default function Workspace() {
   const path = usePathname();
+  const router = useRouter();
   const [user, setUser] = useState<{ username: string; role: string } | null>(
     null,
   );
@@ -79,6 +83,7 @@ export default function Workspace() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [version, setVersion] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   useEffect(() => {
     api<{ username: string; role: string }>("/api/auth/me")
       .then(setUser)
@@ -91,6 +96,18 @@ export default function Workspace() {
         .then(setConfig)
         .catch((e) => setError(e.message));
   }, [user]);
+  useEffect(() => {
+    if (path !== "/documents") return;
+    try {
+      const message = sessionStorage.getItem(deletionNoticeKey);
+      if (message) {
+        sessionStorage.removeItem(deletionNoticeKey);
+        setNotice(message);
+      }
+    } catch {
+      // Browsers may restrict storage. Deletion itself does not depend on it.
+    }
+  }, [path]);
   const refresh = () => setVersion((n) => n + 1);
   const action = async (task: () => Promise<unknown>, success: string) => {
     setError("");
@@ -109,6 +126,7 @@ export default function Workspace() {
       </main>
     );
   if (!user) return <Login onLogin={setUser} />;
+  const canReview = ["reviewer", "admin"].includes(user.role);
   const current = nav.find((n) => n[0] === path);
   const title = path.startsWith("/documents/")
     ? "Document workspace"
@@ -259,6 +277,7 @@ export default function Workspace() {
               config={config}
               version={version}
               onError={setError}
+              onDelete={canReview && path === "/documents" ? setDeleteTarget : undefined}
             />
           ) : path.startsWith("/documents/") ? (
             <DocumentDetail
@@ -266,7 +285,8 @@ export default function Workspace() {
               id={path.split("/")[2]}
               version={version}
               action={action}
-              canReview={["reviewer", "admin"].includes(user.role)}
+              canReview={canReview}
+              onDelete={canReview ? setDeleteTarget : undefined}
             />
           ) : path === "/jobs" ? (
             <Jobs version={version} action={action} />
@@ -281,6 +301,19 @@ export default function Workspace() {
               text="Page not found"
               sub="Choose a workspace page from the navigation."
             />
+          )}
+          {deleteTarget && (
+            <DocumentDeleteDialog key={deleteTarget.id} target={deleteTarget} onClose={() => setDeleteTarget(null)}
+              onDeleted={(message) => {
+                if (path === `/documents/${deleteTarget.id}`) {
+                  try { sessionStorage.setItem(deletionNoticeKey, message); } catch { /* Optional feedback across navigation. */ }
+                  router.replace("/documents");
+                }
+                setDeleteTarget(null);
+                setError("");
+                setNotice(message);
+                refresh();
+              }} />
           )}
           <footer>
             <span>CareGuide Document Intelligence</span>

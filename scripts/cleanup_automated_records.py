@@ -61,7 +61,7 @@ def apply_plan(cfg, plan, ids, confirmation):
     committed = False
     journal = {'state': 'planned', 'document_ids': sorted(selected), 'files': moves}
     with Session() as db:
-        if db.scalar(select(Job.id).where(Job.status.in_(['QUEUED', 'PROCESSING'])).limit(1)):
+        if db.scalar(select(Job.id).where(Job.status.in_(['QUEUED', 'PROCESSING', 'CANCELLING']) | Job.worker_active).limit(1)):
             raise ValueError('Stop active processing before optional cleanup')
         # Refuse deleting history still referenced by any unselected record.
         for comparison in db.scalars(select(Comparison)):

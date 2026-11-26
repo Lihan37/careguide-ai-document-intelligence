@@ -39,17 +39,20 @@ import {
   Action,
 } from "./shared";
 import { Table } from "./document-table";
+import type { DeleteTarget } from "./document-delete-dialog";
 
 export function DocumentList({
   mode,
   config,
   version,
   onError,
+  onDelete,
 }: {
   mode: string;
   config: Config | null;
   version: number;
   onError: (s: string) => void;
+  onDelete?: (document: DeleteTarget) => void;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
@@ -71,6 +74,7 @@ export function DocumentList({
   >(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
+    let active = true;
     const endpoint =
       mode === "/review"
         ? `/api/review-queue?page=${page}&q=${encodeURIComponent(query)}`
@@ -78,13 +82,15 @@ export function DocumentList({
     const load = () =>
       api<{ items: Row[]; total: number }>(endpoint)
         .then((data) => {
+          if (!active) return;
           setRows(data.items);
           setTotal(data.total);
+          if (page > 1 && data.items.length === 0) setPage(Math.max(1, Math.ceil(data.total / 25)));
         })
-        .catch((e) => onError(e.message));
+        .catch((e) => { if (active) onError(e.message); });
     load();
     const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
+    return () => { active = false; clearInterval(timer); };
   }, [mode, page, query, status, type, sort, version, onError]);
   return (
     <section className="panel">
@@ -125,6 +131,7 @@ export function DocumentList({
                 "REQUIRES_REVIEW",
                 "PROCESSING",
                 "QUEUED",
+                "CANCELLING",
                 "FAILED",
                 "CANCELLED",
               ].map((s) => (
@@ -209,7 +216,7 @@ export function DocumentList({
         </div>
       ) : rows.length ? (
         <>
-          <Table rows={rows} highlight={query} />
+          <Table rows={rows} highlight={query} onDelete={onDelete} />
           <div className="pagination">
             <span>
               {total} documents · page {page}

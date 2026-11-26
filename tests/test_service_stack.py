@@ -291,7 +291,7 @@ def test_real_postgres_pgvector_redis_celery(real_stack):
             with psycopg.connect(dsn) as db:
                 metrics['postgresql'] = db.execute('SHOW server_version').fetchone()[0]
                 metrics['pgvector'] = db.execute("SELECT extversion FROM pg_extension WHERE extname='vector'").fetchone()[0]
-                assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '0003'
+                assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '0004'
                 assert db.execute('SELECT DISTINCT vector_dims(vector) FROM document_embeddings ORDER BY 1').fetchall() == [(384,), (1536,)]
                 legacy = db.execute("SELECT vector::text FROM document_embeddings WHERE text='Migration sentinel'").fetchone()[0]
                 assert json.loads(legacy) == [1] + [0] * 1535
@@ -313,5 +313,23 @@ def test_real_postgres_pgvector_redis_celery(real_stack):
             with httpx.Client(base_url=f'http://127.0.0.1:{port}', headers=headers, timeout=10, trust_env=False) as guest:
                 forbidden = guest.post('/api/search/semantic', json={'query': 'internet service subscription'})
                 assert forbidden.status_code == 401
+
+            record = f'/api/documents/{invoice}'
+            preview = client.get(record + '/deletion').json()
+            assert preview['comparison_ids'] == [comparison_id] and not preview['active_processing']
+            assert client.request('DELETE', record, json={'comparison_ids': []}).status_code == 409
+            with psycopg.connect(dsn) as db:
+                original = Path(db.execute('SELECT storage_path FROM documents WHERE id=%s', (invoice,)).fetchone()[0])
+            assert original.is_file()
+            deleted = client.request('DELETE', record, json={'comparison_ids': preview['comparison_ids']})
+            assert deleted.json() == {'deleted': True, 'comparisons_deleted': 1, 'original': 'removed', 'warning': None}
+            assert not original.exists()
+            assert client.get('/api/comparisons/' + comparison_id).status_code == 404
+            assert client.get('/api/documents/' + energy).json()['effective']['customer_name'] == 'Verified Synthetic Office'
+            assert client.get(record).status_code == 404
+            with psycopg.connect(dsn) as db:
+                assert not db.execute('SELECT 1 FROM document_embeddings WHERE document_id=%s', (invoice,)).fetchone()
+            rows = client.post('/api/search/semantic', json={'query': 'equipment for digitizing paperwork'}).json()['items']
+            assert rows and all(item['document_id'] != invoice for item in rows)
 
     (logs / 'results.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')

@@ -166,7 +166,7 @@ export function Badge({ status }: { status: string }) {
           ? "good"
           : ["FAILED", "MISMATCHED"].includes(status)
             ? "bad"
-            : ["PROCESSING", "QUEUED"].includes(status)
+            : ["PROCESSING", "QUEUED", "CANCELLING"].includes(status)
               ? "blue"
               : "warn")
       }

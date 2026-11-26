@@ -10,7 +10,7 @@ from .db import Audit, Document, Embedding, Job, SourceUnit
 from .schemas import Invoice
 from .validation import discount_magnitude, duplicates, validate
 
-ACTIVE_JOB = ('QUEUED', 'PROCESSING')
+ACTIVE_JOB = ('QUEUED', 'PROCESSING', 'CANCELLING')
 
 
 def lock_document(db, document_id, owner_id=None):

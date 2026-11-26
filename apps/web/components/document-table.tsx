@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Ellipsis } from "lucide-react";
+import type { DeleteTarget } from "./document-delete-dialog";
 import {
   Files,
   UploadCloud,
@@ -42,9 +44,11 @@ import {
 export function Table({
   rows,
   highlight,
+  onDelete,
 }: {
   rows: Row[];
   highlight?: string;
+  onDelete?: (document: DeleteTarget) => void;
 }) {
   const excerpt = (text: string) => {
     if (!highlight) return text;
@@ -69,6 +73,7 @@ export function Table({
             <th>Status</th>
             <th>Uploaded</th>
             <th>Review</th>
+            {onDelete && <th>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -119,6 +124,21 @@ export function Table({
                   "—"
                 )}
               </td>
+              {onDelete && (
+                <td className="document-actions-cell">
+                  <details className="document-row-actions">
+                    <summary className="icon-button" aria-label={`Actions for ${row.filename}`}>
+                      <Ellipsis size={18} aria-hidden="true" />
+                    </summary>
+                    <button type="button" className="button secondary" onClick={(event) => {
+                      const menu = event.currentTarget.closest("details");
+                      menu?.removeAttribute("open");
+                      menu?.querySelector("summary")?.focus();
+                      onDelete(row);
+                    }}>Delete</button>
+                  </details>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

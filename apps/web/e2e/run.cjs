@@ -4,6 +4,15 @@ const path = require('node:path');
 const fs = require('node:fs');
 const root = path.resolve(__dirname, '../../..');
 const python = path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+
+// Give the end-to-end deletion flow its own workspace and API rate window.
+// Explicit Playwright filters still run in one isolated context.
+if (process.argv.length === 2) {
+  const groups = [['--grep-invert', '@document-deletion'], ['--grep', '@document-deletion']];
+  const statuses = groups.map(args => spawnSync(process.execPath, [__filename, ...args], { stdio: 'inherit' }).status ?? 1);
+  process.exit(statuses.find(status => status !== 0) ?? 0);
+}
+
 let context;
 let status = 1;
 try {

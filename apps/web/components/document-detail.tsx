@@ -1,4 +1,5 @@
 "use client";
+import type { DeleteTarget } from "./document-delete-dialog";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -59,11 +60,13 @@ export function DocumentDetail({
   version,
   action,
   canReview,
+  onDelete,
 }: {
   id: string;
   version: number;
   action: Action;
   canReview: boolean;
+  onDelete?: (document: DeleteTarget) => void;
 }) {
   const [document, setDocument] = useState<Detail | null>(null);
   const [error, setError] = useState("");
@@ -102,7 +105,7 @@ export function DocumentDetail({
   if (!document) return <div className="loading">Loading document…</div>;
   const ready = ["COMPLETED", "REQUIRES_REVIEW"].includes(document.status);
   const latestJob = document.history[0];
-  const activeJob = document.history.find((job) => ["QUEUED", "PROCESSING"].includes(job.status));
+  const activeJob = document.history.find((job) => ["QUEUED", "PROCESSING", "CANCELLING"].includes(job.status));
   const progressJob = activeJob ?? (!ready ? latestJob : undefined);
   const pendingCandidate = document.history.find((job) => job.candidate_status === "pending");
   const openCandidate = async (jobId: string) => {
@@ -153,6 +156,11 @@ export function DocumentDetail({
         >
           Retry processing
         </button>
+        {onDelete && (
+          <button type="button" className="button secondary delete-document-trigger" onClick={() => onDelete(document)}>
+            Delete
+          </button>
+        )}
       </section>
       {document.error && <div className="alert error">{document.error}</div>}
       {progressJob && (

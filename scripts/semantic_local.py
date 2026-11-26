@@ -24,7 +24,7 @@ SQLITE_COPY = BACKUP / 'careguide.db'
 STORAGE = PROFILE / 'uploads'
 REPORT = PROFILE / 'migration-report.json'
 READY_STATUSES = ('COMPLETED', 'REQUIRES_REVIEW')
-ACTIVE_STATUSES = ('QUEUED', 'PROCESSING')
+ACTIVE_STATUSES = ('QUEUED', 'PROCESSING', 'CANCELLING')
 
 sys.path.insert(0, str(ROOT / 'services/api'))
 from app.config import settings

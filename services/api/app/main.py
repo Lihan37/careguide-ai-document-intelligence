@@ -15,11 +15,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from .config import settings, request_environment_matches
 from .db import Session, User, Document, SourceUnit, Job, Audit, Comparison, get_db, now, uid
 from .security import current_user, reviewer, password_check, password_hash, token
-from .schemas import Login, Invoice, Correction, Review, CompareRequest, SemanticRequest, CandidateAcceptance
+from .schemas import Login, Invoice, Correction, Review, CompareRequest, SemanticRequest, CandidateAcceptance, DocumentDeletion
+from .document_deletion import clean_original, deletion_state, remove_document
 from .processing import EXTENSIONS, signature, ProcessingError, ocr_available
 from .validation import validate, duplicates
 from .jobs import dispatch, recover_stale
-from .reprocessing import (ACTIVE_JOB, current_revision, current_snapshot, effective_invoice, evaluated_issues,
+from .reprocessing import (current_revision, current_snapshot, effective_invoice, evaluated_issues,
                            has_active_job, has_current_extraction, lock_document, publish, source_units)
 from .comparison import compare, mapped_invoice
 from .limits import RequestBodyLimit
@@ -83,7 +84,7 @@ async def guard(request: Request, call_next):
 
 # Handle browser preflights before rate limiting and keep CORS on guard responses.
 app.add_middleware(CORSMiddleware, allow_origins=[settings().cors_origin], allow_credentials=True,
-                   allow_methods=['GET', 'POST', 'PATCH'],
+                   allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],
                    allow_headers=['Content-Type', 'X-CareGuide-Environment', 'X-CareGuide-Run'])
 
 
@@ -255,6 +256,32 @@ def document_status(document_id: str, user=Depends(current_user), db=Depends(get
     return summary(document) | {'job': job_view(job) if job else None}
 
 
+@app.get('/api/documents/{document_id}/deletion')
+def preview_deletion(document_id: str, user=Depends(reviewer), db=Depends(get_db)):
+    return deletion_state(db, owned(db, document_id, user))
+
+
+@app.delete('/api/documents/{document_id}')
+def delete_document(document_id: str, body: DocumentDeletion, user=Depends(reviewer), db=Depends(get_db)):
+    # Comparison creation and worker claims also lock the document first.
+    document = owned(db, document_id, user, lock=True)
+    state = deletion_state(db, document)
+    if state['active_processing']:
+        raise HTTPException(409, 'Wait for processing or cancellation to finish before deleting this document.')
+    if state['blocked']:
+        raise HTTPException(409, 'This document has a comparison the current account cannot remove.')
+    confirmed = state['comparison_ids']
+    if sorted(body.comparison_ids) != confirmed:
+        raise HTTPException(409, 'Saved comparisons changed or were not confirmed. Refresh the deletion details and confirm again.')
+    try:
+        comparisons_deleted = remove_document(db, document, confirmed)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(500, 'Document deletion could not be committed. No original file was removed.') from None
+    original, warning = clean_original(db, document)
+    return {'deleted': True, 'comparisons_deleted': comparisons_deleted, 'original': original, 'warning': warning}
+
+
 @app.get('/api/documents/{document_id}/extraction')
 def extraction(document_id: str, user=Depends(current_user), db=Depends(get_db)):
     document = owned(db, document_id, user)
@@ -411,12 +438,13 @@ def cancel_job(job_id: str, user=Depends(reviewer), db=Depends(get_db)):
         raise HTTPException(404, 'Job not found')
     document = owned(db, job.document_id, user, lock=True)
     db.refresh(job)
-    if job.status not in ACTIVE_JOB:
+    if job.status not in ('QUEUED', 'PROCESSING'):
         raise HTTPException(409, 'Only queued or active jobs can be cancelled')
-    job.status = 'CANCELLED'
-    job.stage = 'Cancelled'
+    processing = job.status == 'PROCESSING'
+    job.status = 'CANCELLING' if processing else 'CANCELLED'
+    job.stage = 'Waiting for the worker to stop' if processing else 'Cancelled'
     if not job.preserves_current:
-        document.status = 'CANCELLED'
+        document.status = job.status
     job.updated_at = now()
     audit(db, user, document.id, 'cancelled', {'job_id': job.id})
     db.commit()

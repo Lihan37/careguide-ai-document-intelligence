@@ -72,6 +72,7 @@ class Job(Base):
     total_pages: Mapped[int] = mapped_column(Integer, default=0)
     retries: Mapped[int] = mapped_column(Integer, default=0)
     preserves_current: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    worker_active: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     candidate_status: Mapped[str | None] = mapped_column(String(20))
     candidate: Mapped[dict | None] = mapped_column(JSON, deferred=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
