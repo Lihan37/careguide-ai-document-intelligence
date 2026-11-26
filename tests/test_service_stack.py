@@ -107,7 +107,7 @@ def real_stack():
     pg_url = url.set(drivername='postgresql').render_as_string(hide_password=False)
     connection_url = url.set(drivername='postgresql', database=database).render_as_string(hide_password=False)
     logs = ROOT / 'data/verification' / ('services-' + run['run_id'])
-    logs.mkdir()
+    logs.mkdir(parents=True)
     port = free_port()
     while port in {3000, 8000}:
         port = free_port()
@@ -224,7 +224,8 @@ def test_real_postgres_pgvector_redis_celery(real_stack):
                 assert energy_record['sources'][0]['page'] == 1
                 assert client.get('/api/documents/' + energy + '/source').content.startswith(b'%PDF')
                 assert client.get('/api/search', params={'q': 'PWR-22'}).json()['total'] == 1
-                for query, expected in [('electricity bill', energy), ('internet service subscription', network)]:
+                for query, expected in [('electricity bill', energy), ('internet service subscription', network),
+                                        ('equipment for digitizing paperwork', invoice)]:
                     started = time.perf_counter()
                     response = client.post('/api/search/semantic', json={'query': query, 'limit': 10})
                     elapsed = time.perf_counter() - started

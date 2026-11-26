@@ -65,11 +65,14 @@ def create_run(environment, kind):
 def verify_owned_directory(path, run_id, environment, kind, frontend=False):
     uuid.UUID(run_id)
     base = ROOT / ('apps/web/.test-runs' if frontend else 'data/evaluation' if environment == 'evaluation' else 'data/test-runs')
-    target = Path(path).resolve()
-    expected = (base / run_id).resolve()
-    if target != expected or not target.is_relative_to(ROOT.resolve()) or not target.is_relative_to(base.resolve()) or target == base.resolve() or Path(path).is_symlink():
+    target = Path(path).absolute()
+    expected = base / run_id
+    if target != expected or target.resolve() != expected:
         raise ValueError('Refusing operation outside the exact automation-owned directory')
-    marker = json.loads((target / MARKER).read_text(encoding='utf-8'))
+    marker_path = target / MARKER
+    if marker_path.is_symlink():
+        raise ValueError('Refusing a redirected automation ownership marker')
+    marker = json.loads(marker_path.read_text(encoding='utf-8'))
     if marker != {'environment': environment, 'kind': kind, 'run_id': run_id}:
         raise ValueError('Automation ownership marker does not match')
     return target

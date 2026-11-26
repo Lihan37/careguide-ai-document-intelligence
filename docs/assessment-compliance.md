@@ -1,40 +1,37 @@
 # Assessment compliance matrix
 
-Assessment scope comes from `Ai Engineer Task 1.3.pdf`. `PASS` means the feature was exercised within the stated scope. `PARTIAL` means the feature works with limited evidence or coverage. `BLOCKED` means a required dependency prevents verification. `NOT_IMPLEMENTED` means the deliverable or feature is absent.
+Scope follows `Ai Engineer Task 1.3.pdf`. PASS means verified within the stated scope. PARTIAL indicates limited scope or evidence. BLOCKED requires a dependency or input. NOT_IMPLEMENTED means the requested feature or deliverable is absent.
 
-## Required features
+## Technical requirements
 
-| Assessment task | Requirement | Status | Evidence |
+| Task and requirement | Status | Source | Tests | Observed evidence | Limits and next action |
+| --- | --- | --- | --- | --- | --- |
+| 1. Multi-file upload and PDF, JPG, PNG, TIFF, XLSX, XLS, CSV readers | PASS | [Upload API](../services/api/app/main.py), [readers](../services/api/app/processing.py) | [API](../tests/test_api.py), [readers](../tests/test_processing.py), [browser](../apps/web/e2e/workflow.spec.ts) | Batch upload and each listed format exercised. | Use synthetic samples for the recording. |
+| 1. Digital text, real OCR, multiple PDF pages and spreadsheet sheets | PASS | [Reader and OCR](../services/api/app/processing.py) | [OCR](../tests/test_ocr.py), [processing](../tests/test_processing.py) | Image-only and mixed PDFs report real Tesseract text. Workbook fixtures verify sheet and cell evidence. | English fixtures are covered. Measure additional languages separately. |
+| 1. Poor OCR quality and corrupt files | PASS | [Reader](../services/api/app/processing.py), [jobs](../services/api/app/jobs.py) | [OCR](../tests/test_ocr.py), [service stack](../tests/test_service_stack.py) | Degraded fixture needs review. Corrupt uploads fail, and a subsequent valid job succeeds. | OCR can miss lines in a degraded image. |
+| 2. Structured invoice header, amounts and line items | PASS | [Extraction routing](../services/api/app/extraction.py), [Gemini](../services/api/app/gemini.py) | [Gemini handling](../tests/test_gemini.py), [layouts](../tests/test_invoice_layouts.py) | Fresh-clone application API sent actual Gemini jobs and matched 69/69 checks across three synthetic invoices. | Broader invoice layouts and live accuracy remain unmeasured. |
+| 2. Unknown values, uncertain fields and source evidence | PASS | [Gemini](../services/api/app/gemini.py), [schema](../services/api/app/schemas.py) | [Gemini handling](../tests/test_gemini.py), [OCR](../tests/test_ocr.py) | Unknown, ungrounded and invalid model fields are rejected or kept null. The live scan retained page 2 total evidence. | Text matches prove a source value appears. Confirm field assignment against the page. |
+| 3. Missing and invalid values, duplicates and financial reconciliation | PASS | [Validation](../services/api/app/validation.py) | [Finance](../tests/test_finance.py), [API](../tests/test_api.py), [browser](../apps/web/e2e/workflow.spec.ts) | Decimal checks verified line math, subtotal, tax and total. Duplicate cases flagged source and invoice matches. | Duplicate warnings require review. |
+| 3. PDF/PDF, PDF/Excel, manual review and correction history | PASS | [Comparison](../services/api/app/comparison.py), [review API](../services/api/app/main.py) | [API](../tests/test_api.py), [service stack](../tests/test_service_stack.py), [browser](../apps/web/e2e/workflow.spec.ts) | Both comparison formats were exercised. Corrected values persisted across restart. Active development comparison snapshots were preserved in cleanup. | Rerun snapshots after a correction. |
+| 4. REST upload, status, extraction, search, correction and reprocess | PASS | [FastAPI routes](../services/api/app/main.py), [OpenAPI notes](api-reference.md) | [API](../tests/test_api.py), [reliability](../tests/test_reliability.py), [browser](../apps/web/e2e/workflow.spec.ts) | Actual API and Chromium covered authentication, preview/download, correction and retry. | Auth is local assessment scope. |
+| 4. Background OCR, progress, retries, duplicate delivery and stale recovery | PASS | [Jobs](../services/api/app/jobs.py), [Celery tasks](../worker/tasks.py) | [Service stack](../tests/test_service_stack.py), [reliability](../tests/test_reliability.py) | Redis and a real worker processed an eight-page scan, responded to duplicate delivery and recovered an expired lease. API health checks succeeded during OCR. | Run Linux prefork and multi-worker failover before a production claim. |
+| 5. Metadata, extracted text, results, errors and job history | PASS | [ORM and indexes](../services/api/app/db.py), [migrations](../services/api/migrations/versions) | [Service stack](../tests/test_service_stack.py), [API](../tests/test_api.py) | Fresh SQLite migrated to head. Isolated PostgreSQL verified migrations, indexes, legacy vectors and persistent records. | No schema migration was needed for the active development cleanup. |
+| 5. Keyword filtering and semantic retrieval | PASS | [Keyword endpoint](../services/api/app/main.py), [vector search](../services/api/app/search.py) | [Service stack](../tests/test_service_stack.py), [browser](../apps/web/e2e/workflow.spec.ts) | BGE and pgvector ranked intended documents first for the measured synthetic queries. Source offsets and ownership were verified. | Text scans and exact cosine ranking need workload-specific scale tests. |
+| 6. Batch upload, progress, inspection, review and search UI | PASS | [Next.js components](../apps/web/components) | [Chromium](../apps/web/e2e/workflow.spec.ts), [TypeScript/build](testing.md) | Five Chromium flows passed. Active Documents page contained the same 15 IDs as the API. | Semantic backend and source links were verified through the isolated stack. |
+| 7. Automated tests for processing, OCR, spreadsheets, AI, validation, API and failure | PASS | [Backend tests](../tests), [browser tests](../apps/web/e2e) | [Final regression](testing.md) | 231 backend tests and five Chromium workflows passed. TypeScript and production build passed. | Keep optional test-provider credentials private. |
+| 7. Labeled accuracy, time, success and failure metrics | PASS | [Evaluation runner](../scripts/evaluate.py), [ground truth](../sample-data/ground-truth.json) | [Final evaluation](evaluation-report.md) | Measured deterministic, OCR, live Gemini, search, queue and PDF-scale results. | Synthetic corpus and environment limit generalization. |
+| Cross-cutting scale, reliability and security | PARTIAL | [Isolation](architecture.md#environment-boundaries), [security](security.md) | [Service stack](../tests/test_service_stack.py), [isolation](../tests/test_environment_isolation.py), [benchmark](../scripts/benchmark_scaling.py) | Audits cover ownership, private files, isolated runs, dependency advisories and bounded processing. Scale run included synthetic digital 1,000 pages and scan 16 pages. | Measure 1,000-page image-only inputs, sustained throughput and production failover. |
+
+## Nine submission deliverables
+
+| Deliverable | Status | Location and evidence | Next action |
 | --- | --- | --- | --- |
-| 1. Document processing | Multiple uploads and PDF, JPG, PNG, TIFF, XLSX, XLS and CSV readers | PASS | Reader and upload tests exercise all listed formats. See [testing](testing.md). |
-| 1. Document processing | Digital PDFs, image OCR, scanned and mixed PDFs, multiple pages and workbook sheets | PASS | Tesseract recognizes the bundled images and scans. Backend tests verify page and cell evidence. See [OCR results](evaluation-report.md#real-ocr-verification). |
-| 1. Document processing | Poor-quality inputs and corrupt file handling | PASS | Degraded OCR produces a reviewable result. Corrupt PDF and image inputs fail visibly and the worker continues. See [test coverage](testing.md). |
-| 2. AI extraction | Structured invoice number, date, supplier, customer, subtotal, tax, total, currency and line items | PASS | Free-tier live Gemini matched 69/69 checks across three synthetic invoices, including a two-page scan. See [live AI results](evaluation-report.md#gemini-invoice-extraction). |
-| 2. AI extraction | Preserve unknowns and uncertain fields, with source evidence | PASS | Backend tests cover nulls, ungrounded values, invalid responses and page evidence. Human review remains available. |
-| 3. Data validation | Missing fields, incorrect numbers, duplicate detection and Decimal reconciliation | PASS | Automated tests cover missing and invalid values, duplicate files and invoices, line math, subtotal, tax and total. |
-| 3. Data validation | PDF-to-PDF and PDF-to-Excel reconciliation, review and correction | PASS | Comparisons run through the API and browser. Review corrections preserve the original and audit the change. |
-| 4. Backend | REST uploads, processing status, extraction, search, manual correction and failed-job reprocessing | PASS | Authentication, ownership, job lifecycle and API/browser workflows passed. See [endpoint reference](api-reference.md). |
-| 4. Backend | OCR and AI work off the API request path | PASS | Isolated Redis/Celery run processed eight OCR pages while all sampled API health requests succeeded. Local process mode also passed browser tests. |
-| 4. Backend | Retries, duplicate delivery protection and stale-job recovery | PASS | Real Redis/Celery test replayed a delivery, retried a failed corrupt upload, and recovered an expired lease before reprocessing. |
-| 5. Database and search | Store metadata, extracted text, structured results, validation errors and history | PASS | PostgreSQL migrations, audit and source storage, correction and comparison persistence after API restart, and SQLite coverage. See [database schema](database-schema.md). |
-| 5. Database and search | Keyword search and filtering | PASS | Parameterized text filters verified through PostgreSQL, SQLite and Chromium. |
-| 5. Database and search | Real semantic search with document sources | PASS | CPU BGE inference and pgvector ranked both tested paraphrases first. Stored excerpts matched page text, and search enforced ownership. |
-| 6. Frontend | Batch upload, progress, detail, validation review, correction and search | PASS | Five Chromium workflows passed. The search page distinguishes keyword results from semantic matches. |
-| 7. Testing | Automated document, OCR, spreadsheet, AI, validation, API and failure tests | PASS | 230 backend tests and five Chromium workflows passed. TypeScript and production build passed. |
-| 7. Evaluation | Labeled accuracy, time, success and failure rates | PASS | Deterministic, OCR, live Gemini and scaling reports provide measured outcomes and independent fixture labels. See [evaluation report](evaluation-report.md). |
-| Cross-cutting | Large PDFs and sustained processing volumes | PARTIAL | Synthetic PDF scale benchmark covers a 1,000-page digital sample and scans through 16 pages. Production volumes and 1,000-page scanned inputs require separate measurement. |
-| Cross-cutting | Reliability and security | PARTIAL | Authentication, per-owner isolation, private uploads, input limits and auditable corrections are tested. Multi-worker failover and a production security assessment remain open. |
-
-## Submission deliverables
-
-| Deliverable | Status | Evidence |
-| --- | --- | --- |
-| Git repository with source | PASS | Existing GitHub repository and commit history |
-| README and setup | PASS | [README](../README.md) and [Windows setup](setup-windows.md) |
-| Architecture diagram and database schema | PASS | [Architecture](architecture.md) and [database schema](database-schema.md) |
-| Working backend API and frontend | PASS | [API reference](api-reference.md) and [browser results](testing.md) |
-| PDF, image, Excel and CSV pipelines | PASS | Reader, OCR, parser and validation evidence in the [test report](testing.md) |
-| Automated tests and results | PASS | [Test summary and commands](testing.md) |
-| Evaluation report with actual metrics | PASS | [Evaluation report](evaluation-report.md) |
-| Recorded walkthrough | NOT_IMPLEMENTED | The [walkthrough script](demo-script.md) is ready for recording. |
-| AI prompts and assistance disclosure | PASS | [Prompt locations and disclosure](ai-assistance-disclosure.md) |
+| 1. Source repository | PASS | GitHub main and verified commit history | Include repository URL with submission. |
+| 2. README and setup | PASS | [README](../README.md), [Windows setup](setup-windows.md), [clean Windows verification](testing.md#clean-windows-reproduction) | WSL is documented as an alternative. |
+| 3. Architecture and database schema | PASS | [Mermaid architecture](architecture.md), [schema and indexes](database-schema.md) | Include both links. |
+| 4. Working API and frontend | PASS | [API reference](api-reference.md), [runtime and browser evidence](testing.md) | Show the running app in the walkthrough. |
+| 5. PDF, image, Excel and CSV pipelines | PASS | [Processing source](../services/api/app/processing.py), [format tests](../tests/test_processing.py) | Use synthetic fixtures for the demo. |
+| 6. Automated tests and results | PASS | [Test commands, checks and results](testing.md) | Share the public test summary. |
+| 7. Measured evaluation report | PASS | [Evaluation report](evaluation-report.md) | Include its synthetic-data and scale limitations. |
+| 8. Recorded walkthrough | NOT_IMPLEMENTED | [Prepared 7:40 script](demo-script.md) | Record and review the walkthrough before submitting. |
+| 9. Prompts and AI disclosure | PASS | [Prompt locations, AI contribution and checks](ai-assistance-disclosure.md) | Retain the disclosure with the submission. |

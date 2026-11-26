@@ -6,7 +6,7 @@
 
 - Private originals are written to generated UUID names under configurable storage outside the web root. API requests never accept a storage path. The supplied basename is display metadata only; traversal names cannot select destinations.
 - Upload allowlist, per-file byte limit, batch count limit, signature checks, XLSX ZIP expanded-size/member count limits, macro/unsafe-member rejection, page/frame/cell/pixel limits, active PDF action/embedded-file rejection and PDF object count limits.
-- OCR uses pytesseract without a shell and a per-call timeout. Image rendering has a pixel cap; pages are released individually. Worker containers have CPU/memory and task time limits. Native parser vulnerabilities still require dependency patching and stronger production isolation.
+- OCR starts the native Tesseract CLI with an argument list and a per-call timeout. Image rendering has a pixel cap and releases each rendered page. Worker containers have CPU, memory and task time limits.
 - Passwords use randomly salted scrypt. Session cookies are signed with an environment secret, HttpOnly, SameSite=Lax, eight-hour expiration; Secure is enabled for an HTTPS configured origin. No default shared password/secret works: startup enforces minimum lengths. Generated local credentials remain ignored in `.env`.
 - Read access is restricted to document owner; reviewer/admin role is required for corrections, comparisons, retry/cancel/recovery and review decisions. Unauthorized foreign UUIDs return 404. Stale recovery is owner-scoped. There is no public original-file route.
 - CORS permits one explicit origin and credentials. State changes reject a conflicting Origin header. Scheme/host must stay consistent. SameSite cookies and Origin checks are the assessment CSRF defense; no standalone CSRF-token flow is implemented.
@@ -19,7 +19,7 @@
 
 ## Verified checks
 
-Tests exercise unauthenticated private-source rejection, foreign-owner access denial, viewer mutation rejection, malicious Origin rejection, path traversal filenames, signatures/extensions, file count/size limits, active PDF content, workbook dimensions, malformed CSV, invalid financial values, invalid provider outputs, cancellation, idempotent terminal deliveries, bounded retries, and stale recovery. `pip check` reports no broken backend requirements. This is not a penetration test, dependency vulnerability audit or proof of production readiness.
+Tests exercise unauthenticated requests, foreign-owner access, viewer mutation, conflicting origins, unsafe uploads, provider errors, cancellation, duplicate deliveries and stale recovery. A dependency advisory scan flagged the former Pillow 12.3.0 pin. After updating to Pillow 13.0.0, `pip-audit` and `npm audit` reported no known findings in the audited lockfiles, and `pip check` passed. The final Git scan checked indexed files for credential signatures and private paths. These checks cover the assessed dependencies and workflows. Production penetration testing remains open. [Pillow release notes](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html)
 
 ## Deployment work remaining
 

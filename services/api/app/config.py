@@ -85,10 +85,10 @@ class Settings(BaseSettings):
             raise ValueError('Automation kind and environment do not match')
         base = PROJECT_ROOT / ('data/evaluation' if expected else 'data/test-runs')
         root = Path(self.runtime_root).resolve()
-        if root != (base / run_id).resolve() or not root.is_relative_to(base.resolve()) or root == base.resolve():
+        if root != base / run_id:
             raise ValueError('Runtime root must be the environment-owned UUID directory')
         marker_path = root / '.careguide-run.json'
-        if not marker_path.is_file() or json.loads(marker_path.read_text(encoding='utf-8')) != {'environment': self.app_env, 'kind': self.automation_kind, 'run_id': run_id}:
+        if marker_path.is_symlink() or not marker_path.is_file() or json.loads(marker_path.read_text(encoding='utf-8')) != {'environment': self.app_env, 'kind': self.automation_kind, 'run_id': run_id}:
             raise ValueError('Runtime ownership marker is missing or does not match')
         storage = Path(self.storage_dir).resolve()
         if not storage.is_relative_to(root) or storage == root:

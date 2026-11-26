@@ -2,7 +2,7 @@
 
 ## Confirmed root cause
 
-The original uploaded `CareGuide_Test_Invoice_CG-2026-001.pdf` was located through its persisted document record, not replaced with generated financial answers. Its stored original checksum matches the supplied Downloads copy. It explicitly identifies itself as synthetic software-test data; a byte-for-byte copy is retained as `sample-data/layout-invoice.pdf` for regression testing. Document text is treated as untrusted data, not application instructions.
+The original synthetic invoice CG-2026-001 was inspected through its persisted document record. Its stored checksum matched the supplied copy. The regression fixture `sample-data/layout-invoice.pdf` contains the same bytes. The parser treats uploaded document text as untrusted data.
 
 PyMuPDF extracted all invoice text successfully. The database showed two completed processing attempts (initial and first retry), both `REQUIRES_REVIEW`, with no job error. The extractor produced eight null header fields and no items. The ten issues were one invalid currency, eight missing required fields and missing line items. No application log files were found in the project/data log locations; the persisted jobs, source text and issues provide the failure evidence.
 

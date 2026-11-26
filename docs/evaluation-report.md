@@ -1,5 +1,13 @@
 # Evaluation report
 
+## Final pre-submission checks
+
+The clean Windows checkout reran the deterministic evaluation on 14 independently labeled synthetic fixtures. Thirteen processed successfully and the deliberate corrupt PDF failed. This is **92.86% processing success**, **7.14% failure**, and all 14 expected processing outcomes. The 13 readable files matched **104/104 header checks** and all **13/13 expected total-validation decisions** in **8.509 seconds** of aggregate pipeline time. That field metric excludes failed documents and includes expected nulls. The positive duplicate pair was flagged. PDF/PDF totals differed by 30 and PDF/Excel totals differed by 5 as expected.
+
+A separate smoke test uploaded the three Gemini fixtures through the running scratch clone's API and waited for the actual background jobs. Results persisted as `llm:gemini:gemini-3.5-flash-lite`, matched **69/69** header and line-item checks, and passed Decimal validation on **3/3** invoices. The scanned invoice used actual Tesseract on both pages and retained total evidence on page 2. Audit records captured **five attempts with four usage responses**, **1,785 reported input tokens**, **1,189 reported output tokens**, and **15.602 seconds** of aggregate adapter time. That measurement is separate from the earlier direct live evaluation below. Mocked Gemini tests exercise malformed, ungrounded and failed provider responses.
+
+All three tested paraphrases ranked the expected document first in the final service run. The walkthrough query `equipment for digitizing paperwork` returned the positioned invoice's page 1 with no literal keyword match. The worker reported page counts 0–8, and all 24 sampled API health requests during OCR succeeded. The maximum sample was **1.84 ms** over loopback. [Final test scope](testing.md)
+
 ## PostgreSQL, pgvector and queue verification
 
 Docker provided PostgreSQL **17.12** with pgvector **0.8.7** and Redis **7.4.9** on separately assigned loopback ports. The API and a real Celery `solo` worker ran as separate Windows Python processes. A fresh PostgreSQL database migrated through revisions `0001` and `0002`, preserved a 1,536-dimensional migration sentinel, and stored genuine 384-dimensional BGE embeddings. PostgreSQL persisted uploaded records, manual corrections and comparison results across an API restart. The test inspected all three new indexes and verified the owner/time index with an `EXPLAIN` diagnostic.

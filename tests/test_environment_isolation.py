@@ -170,6 +170,18 @@ def test_runtime_cleanup_cannot_target_development_or_foreign_run(context):
             verify_owned_directory(target, context['run_id'], 'test', 'pytest')
 
 
+def test_runtime_directory_redirection_cannot_change_the_owned_run(context, monkeypatch):
+    owned = Path(context['root'])
+    redirected = owned.with_name('foreign-run')
+    resolve = Path.resolve
+    monkeypatch.setattr(Path, 'resolve', lambda path, *args, **kwargs:
+                        redirected if path == owned else resolve(path, *args, **kwargs))
+    with pytest.raises(ValueError, match='environment-owned UUID directory'):
+        model(context)
+    with pytest.raises(ValueError, match='Refusing operation'):
+        verify_owned_directory(owned, context['run_id'], 'test', 'pytest')
+
+
 def test_api_identifies_environment_and_records_upload_provenance(client):
     cfg = settings()
     assert client.get('/api/environment').json() == cfg.provenance

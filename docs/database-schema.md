@@ -2,6 +2,8 @@
 
 Alembic revision `0001` creates the relational schema and PostgreSQL vector extension. Revision `0002` adds composite indexes and removes the PostgreSQL column's fixed 1,536-dimensional type constraint while retaining existing vectors. SQLite keeps its existing vector column definition and has keyword search. Run migrations against the intended database before starting the API.
 
+The final Windows installation applied both revisions to fresh SQLite. The PostgreSQL service regression verified the upgrade against a disposable database with a pre-existing legacy vector. See [isolation and stack verification](testing.md#postgresql-redis-and-celery-verification).
+
 ```mermaid
 erDiagram
     users ||--o{ documents : owns

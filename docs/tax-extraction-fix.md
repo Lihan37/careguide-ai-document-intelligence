@@ -2,7 +2,7 @@
 
 ## Evidence and root cause
 
-The uploaded `CareGuide_Test_Invoice_CG-2026-002.pdf` was located through the application database and inspected directly with PyMuPDF. Its text explicitly prints `Tax (VAT 10%)` and `BDT 965.00` in adjacent positioned cells. The document identifies itself as a fictional software-testing invoice; `sample-data/tax-layout-invoice.pdf` preserves that original synthetic PDF for regression tests.
+The second synthetic invoice was located through the application database and inspected directly with PyMuPDF. It prints `Tax (VAT 10%)` and `BDT 965.00` in adjacent positioned cells. The regression fixture `sample-data/tax-layout-invoice.pdf` contains the same synthetic PDF.
 
 Both stored review issues were extraction-related: `invalid_tax` and `required_tax`. There were no duplicate or arithmetic issues to suppress. The old annotation regex removed only bare percentages such as `(10%)`, leaving `(VAT 10%)` in the label. The label therefore failed to identify the adjacent amount. Separately, the generic `Tax ...` label matcher misread the heading `TAX INVOICE` as a tax field with observed value `INVOICE`, producing the invalid-tax evidence.
 

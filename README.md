@@ -1,6 +1,6 @@
 # CareGuide AI Document Intelligence
 
-A working local financial-document workflow: upload private files, process them asynchronously, inspect structured invoices and source evidence, validate arithmetic, compare PDF/PDF and PDF/Excel records, correct values with an audit trail, and search saved records.
+CareGuide reduces the manual work of reading and reconciling financial documents. Upload files, inspect invoice fields and their sources, verify arithmetic, compare PDF and Excel records, and correct or search results. Originals stay private and corrections retain audit history.
 
 Built against the supplied **Ai Engineer Task 1.3.pdf** (seven tasks, nine deliverables). The application is intended for local demonstration; no deployment was performed. All bundled financial records are clearly synthetic.
 
@@ -10,7 +10,7 @@ Built against the supplied **Ai Engineer Task 1.3.pdf** (seven tasks, nine deliv
 
 ## Quick start — Windows, no paid services
 
-From `D:\Projects\CareGuide-AI-Assessment`, with Python 3.13 and Node 22:
+From the cloned repository root, with Python 3.13 and Node 22:
 
 ```powershell
 python -m venv .venv
@@ -146,7 +146,7 @@ Run `npm.cmd run test:e2e --prefix apps/web` after `npx.cmd --prefix apps/web pl
 | Pytest / Playwright | Fresh `data/test-runs/<UUID>/careguide.db` and `uploads/` per run; no development `.env` loading or default-path fallback. Temporary data is removed after tests. Reports remain under `data/verification/`. |
 | Evaluation | Fresh `data/evaluation/<UUID>/careguide.db`, copied `fixtures/`, and `uploads/`; reports remain in the same run folder. No development document rows are written. The Evaluation page can read `data/evaluation/latest-results.json`. |
 
-Automation requires explicit environment, kind, run UUID, ownership marker, database and storage paths. Paths must belong to the matching run namespace. Development cannot reuse automation paths. Pytest/framework markers, browser run-identity checks and tagged-request rejection protect against accidentally using the normal API. Celery queues/key prefixes are scoped by environment/run; the verified automated runners use local processing. Alembic migrations remain supported, but development downgrades/resets are blocked.
+Automation requires explicit environment, kind, run UUID, ownership marker, database and storage paths. Paths must belong to the matching run namespace. The runtime rejects redirected run directories and ownership markers. Browser identity checks and tagged requests protect the normal API. Celery queue names and Redis prefixes are scoped by run. Development database downgrade/reset commands are blocked.
 
 Inspect existing records without modifying them:
 
@@ -155,21 +155,16 @@ Inspect existing records without modifying them:
 .\.venv\Scripts\python scripts/cleanup_automated_records.py
 ```
 
-The inventory is saved privately to `data/inspection/records-report.csv` and JSON, including filename, ID, upload time, status, likely source, original path and cleanup eligibility. The generic cleanup script is **dry-run by default** and applies only to isolated runs. Historical names and checksums alone cannot establish origin. See [backup and cleanup](docs/testing.md#development-backup-and-historical-cleanup) for the documented local recovery and the one confirmed historical Playwright upload that was removed from development.
+The inventory is saved privately to `data/inspection/records-report.csv` and JSON, including filename, ID, upload time, status, likely source, original path and cleanup eligibility. The generic cleanup script is **dry-run by default** and applies only to isolated runs. The separate [development cleanup audit](docs/development-document-cleanup-report.md) describes the historical record reconciliation.
 
 The Windows OCR run used the project-local Tesseract 5.5.4 build. It processed 13/14 files in the original evaluation and 7/8 in a dedicated scan benchmark. The deliberate corrupt files failed. The scan benchmark includes image-only, multipage and mixed PDFs. See the [measured results and limitations](docs/evaluation-report.md) and [Windows setup](docs/setup-windows.md#ocr).
 
 ## Demonstration and submission
 
-Use invoice.pdf for a valid 220 total, incorrect-total.pdf for a 250→220 audited correction, accounting.xlsx for a 225 total mismatch, duplicate.pdf for exact checksum detection, and corrupted.pdf for a failed-job retry. Image/scanned fixtures require the separately installed free Tesseract binary. [5–8 minute recording script](docs/demo-script.md), [AI prompts and disclosure](docs/ai-assistance-disclosure.md).
+Upload `sample-data/invoice.pdf` and `accounting.xlsx`, open **Processing Jobs**, then compare the results in **Document Comparison**. The totals differ by 5. Use `incorrect-total.pdf` to demonstrate a 250-to-220 audited correction and `ocr/multipage.pdf` for real OCR on both pages. Use the separate scratch-workspace instructions for the live AI and semantic-search segments. [7:40 recording plan](docs/demo-script.md)
 
-Before GitHub submission:
+The technical handoff includes the [assessment matrix](docs/assessment-compliance.md), [clean Windows verification](docs/testing.md#clean-windows-reproduction), [evaluation report](docs/evaluation-report.md), and [AI prompts and disclosure](docs/ai-assistance-disclosure.md). Record the actual walkthrough and include it with those links when preparing the recruitment submission.
 
-- Review source, run setup from a clean checkout and understand the architecture/financial rules.
-- Install OCR, run scan tests/evaluation; start Docker and verify PostgreSQL/Redis/Celery/pgvector. Configure a real LLM/embedding provider if demonstrating AI; record actual provider evaluation separately.
-- Read [known limitations](docs/limitations.md) and [security scope](docs/security.md). Do not claim 1000-page performance, production readiness or unmeasured AI accuracy.
-- Record the actual narrated walkthrough. Screenshots and automated browser checks do not replace it.
-- Check that `.env`, data/, credentials and private records are excluded. Review the initialized local Git repository, commit source/docs/locks/synthetic data, then push only when you choose to authorize it. Repository publication was explicitly authorized by the user after local verification.
-- Submit repository URL, setup, diagram/schema, working code/pipelines, tests/results, measured report, walkthrough and accurate AI disclosure within the assessment deadline. Its five-day statement has no supplied start date; this project does not infer a new deadline.
+## Security and limits
 
-For port/login/OCR/Docker problems, see [Windows troubleshooting](docs/setup-windows.md). This is an assessment implementation with documented operational limits, not a claim of audited production financial processing.
+The API enforces authentication and per-owner document access. Upload size, format, page and pixel limits constrain untrusted inputs. Provider calls use structured output and retained source evidence. Private originals, credentials and run artifacts belong in ignored local paths. The audit verified these controls with synthetic data. Production hardening and sustained throughput remain separate work. [Security scope](docs/security.md) · [Known limitations](docs/limitations.md)

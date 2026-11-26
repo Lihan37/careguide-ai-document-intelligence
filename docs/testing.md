@@ -1,6 +1,6 @@
 # Tests, environment isolation and safe inspection
 
-The verification environment used Windows, Python 3.13, Node 22.17 and Tesseract 5.5.4 with English traineddata. **230 backend tests and five isolated browser workflows passed**, with zero failures and zero skips. The backend count includes the live PostgreSQL, pgvector, Redis and Celery integration test. TypeScript and the production build also passed.
+The final verification used Windows, Python 3.13, Node 22.17, Pillow 13.0.0 and Tesseract 5.5.4 with English traineddata. **231 backend tests and five isolated Chromium workflows passed**, with zero failures and zero skips. The count includes real PostgreSQL, pgvector, Redis/Celery, and OCR. TypeScript and the production build passed. The separate Gemini API smoke test used the configured provider and synthetic inputs.
 
 ## Safe commands
 
@@ -33,13 +33,13 @@ Playwright servers shut down cooperatively before temporary directories are remo
 
 ## Coverage and actual evidence
 
-The backend suite covers unsafe or missing configuration, database and storage paths, ownership markers, hardlinks, PostgreSQL naming, wrong-server requests, audit provenance, read-only inspection, cleanup, migration reset protection and broker namespaces. Gemini evaluation has a regression test that rejects a process with cached app settings before reading a credential or changing the environment.
+The backend suite covers unsafe configuration, database and storage paths, hardlinks, PostgreSQL naming, wrong-server requests, audit provenance, read-only inspection, cleanup, migration reset protection and broker namespaces. The final isolation regression simulates a redirected run directory and verifies that both startup and cleanup reject it. The Gemini evaluation rejects a process with cached application settings.
 
 The backend OCR suite covers JPG, PNG, multi-frame TIFF, image-only PDFs, multipage scans, and a mixed PDF with a text layer on its first page and a digital footer on its scanned second page. It checks original OCR text, source page evidence, Decimal arithmetic, blank scans, corrupt images, unsupported formats, a retry after restoring language configuration and manual correction with the original OCR warning retained. The fifth browser workflow uploads a multipage scan and checks the structured total, second-page evidence and passing validation through the isolated API and background worker. Existing browser workflows cover digital invoices, correction, review, search, comparison, duplicate warnings and failed-job retries.
 
 The latest isolated evaluation processed 13 of 14 fixtures, with the deliberately corrupt PDF as the only failure. It matched 104 of 104 scored header values across successfully processed fixtures. The separate OCR benchmark processed seven of eight scan fixtures and measured nine OCR pages. See the [OCR evaluation results](evaluation-report.md#real-ocr-verification).
 
-Read-only snapshots taken after the reviewed cleanup and after the automated checks showed identical hashes for all eight development tables and all 22 retained originals. Both manual invoices were re-extracted locally without changing their records. Each produced four line items and passed Decimal validation.
+Read-only snapshots taken after the final cleanup and after the automated checks matched across all eight development tables and all 15 retained originals. The authenticated development API and Chromium displayed the same 15 IDs. Both manual invoices retained four line items and passed Decimal validation. All manual originals were checksum-verified through their download route, and the preview route returned images.
 
 `docs/pytest-results.xml`, `docs/browser-results.json`, `docs/evaluation-results.json` and the earlier extraction/tax reports are historical checkpoints. New automated outputs go under ignored `data/verification/` or `data/evaluation/`. Local vector search, queue processing and PDF scale measurements are recorded in the [evaluation report](evaluation-report.md).
 
@@ -86,6 +86,14 @@ Use this database, its own upload directory and matching Redis URL when launchin
 
 Run `.\.venv\Scripts\python scripts/benchmark_scaling.py` with OCR configured to reproduce the isolated PDF benchmark. Each fixture runs in a fresh Python process, and output stays under `data/evaluation/<UUID>/scaling-benchmark.json`.
 
+## Clean Windows reproduction
+
+A separate checkout of GitHub main was created from `e8fc3e3`. A fresh virtual environment installed the repository lockfile, `npm.cmd ci --prefix apps/web` installed the frontend lock, and `scripts/setup-local.ps1 -SkipInstall` generated a new private configuration and migrated fresh SQLite to `0002`. The audit changes were then applied to that checkout and the updated Pillow lock was installed. A previously absent verification directory exposed a stack-test setup issue. The fixed test creates its own reports directory.
+
+The fresh clone started its API and frontend on separate loopback ports and signed in using its generated account. It fetched its own public BGE model files and produced a 384-dimensional vector. Its runtime used the existing native Tesseract executable and English language data. The scratch live Gemini check temporarily read the configured free-tier key through the local environment file and removed it from the scratch file after the run. Docker provided disposable PostgreSQL and Redis. The audit did not reinstall Docker Desktop or Tesseract, execute the WSL install, or run the Linux prefork Compose worker.
+
+See the [quick start](../README.md#quick-start--windows-no-paid-services), [OCR setup](setup-windows.md#ocr), and [isolated services](#postgresql-redis-and-celery-verification) to reproduce these steps. Keep the API and frontend ports consistent with `NEXT_PUBLIC_API_URL` and `CORS_ORIGIN` when the normal development app is already running.
+
 ## Inspect existing records
 
 ```powershell
@@ -126,6 +134,6 @@ Before any authorized local cleanup, take a SQLite online backup with Python's `
 
 The historical Playwright config used the normal development frontend. Its archived passing report matched five uploads in its two recorded test windows, supported by the exact upload order and scripted audit notes. One confirmed corrupt-PDF upload had no references from retained records and was removed. Four confirmed uploads remain because other records reference them. Other similar uploads remain for review because no equally strong run evidence was available. The generic isolated-run cleanup rules remain unchanged.
 
-The private dry run, verified database and 23-original backup, and quarantine journal are under `data/inspection/archived-browser-cleanup/`. Follow-up comparison confirmed all 22 retained records, their dependents, comparisons, users and original checksums match the backup. Both manual invoices and the résumé were preserved.
+The earlier cleanup removed one confirmed historical test upload. The final audit recovered additional archived launch/completion evidence, backed up the then-current 22 originals, and removed seven more historical test records. The final audit kept every active comparison and followed its retained document references before selecting removals. See the [development cleanup report](development-document-cleanup-report.md) for classifications, verification and the private artifact layout.
 
 Workflow references: [Playwright web servers](https://playwright.dev/docs/test-webserver), [Pydantic settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
