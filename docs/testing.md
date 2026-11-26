@@ -1,6 +1,6 @@
 # Tests, environment isolation and safe inspection
 
-The OCR verification environment used Windows, Python 3.13, Node 22.17 and Tesseract 5.5.4 with English traineddata. **201 backend tests and 5 isolated browser workflows passed**, with zero failures and zero skips. The four previously skipped OCR tests ran against the native executable. The existing Starlette/TestClient httpx deprecation warning remains visible.
+The verification environment used Windows, Python 3.13, Node 22.17 and Tesseract 5.5.4 with English traineddata. **228 backend tests and five isolated browser workflows passed**, with zero failures and zero skips. TypeScript and the production build also passed.
 
 ## Safe commands
 
@@ -25,7 +25,7 @@ To include real OCR, export `TESSERACT_CMD`, `TESSERACT_DATA_DIR` and `OCR_LANGU
 | Browser tests | APP_ENV=test, AUTOMATION_KIND=playwright; fresh database/uploads under `data/test-runs/<UUID>`, source-only frontend copy under `apps/web/.test-runs/<UUID>`, independent loopback ports and generated credentials. |
 | Evaluation | APP_ENV=evaluation, AUTOMATION_KIND=evaluation; fresh `data/evaluation/<UUID>/careguide.db`, copied `fixtures/`, `uploads/`, metrics/report files. |
 
-`scripts/runtime_env.py` creates unique roots and ownership markers. Automated settings require explicit paths, environment, automation kind and run UUID; there is no development fallback. Test/evaluation do not load `.env`. Paths are resolved, checked against their environment namespace and protected development locations, and must have a matching ownership marker. Tests also reject hardlinks to a configured development database. Development cannot reuse test/evaluation paths. PostgreSQL support is retained; automated PostgreSQL DB names must include the environment and unique run ID, but PostgreSQL runtime was not tested here.
+`scripts/runtime_env.py` creates unique roots and ownership markers. Automated settings require explicit paths, environment, automation kind and run UUID. Paths are resolved, checked against protected development locations and their environment namespace, and must have a matching ownership marker. Pytest and Playwright do not load development settings or credentials. The opt-in live Gemini CLI reads only its key and selected Gemini/OCR settings from the local file, writes to a dedicated evaluation directory, and refuses to run inside a process with cached application settings. Development cannot reuse test/evaluation paths. Automated PostgreSQL DB names must include the environment and run ID. PostgreSQL configuration is covered by tests and its runtime remains unverified.
 
 Pytest configures isolation before importing the app, migrates an isolated database through Alembic for API assertions and synchronous task dispatch for determinism, and closes/removes its run-owned database/uploads at teardown. It no longer regenerates committed fixtures. Each Playwright run migrates its own database and exercises the real local background process. It verifies `/api/environment` before each test and sends environment/run headers; the API rejects mismatched tagged requests before document insertion. New upload audit details identify the originating environment/run. Normal startup creates no fixture records.
 
@@ -33,15 +33,15 @@ Playwright servers shut down cooperatively before temporary directories are remo
 
 ## Coverage and actual evidence
 
-The backend suite includes **41 environment-isolation cases** for unsafe or missing configuration, database and storage paths, ownership markers, hardlinks, PostgreSQL naming, wrong-server requests, audit provenance, read-only inspection, cleanup, migration reset protection and broker namespaces.
+The backend suite covers unsafe or missing configuration, database and storage paths, ownership markers, hardlinks, PostgreSQL naming, wrong-server requests, audit provenance, read-only inspection, cleanup, migration reset protection and broker namespaces. Gemini evaluation has a regression test that rejects a process with cached app settings before reading a credential or changing the environment.
 
 The backend OCR suite covers JPG, PNG, multi-frame TIFF, image-only PDFs, multipage scans, and a mixed PDF with a text layer on its first page and a digital footer on its scanned second page. It checks original OCR text, source page evidence, Decimal arithmetic, blank scans, corrupt images, unsupported formats, a retry after restoring language configuration and manual correction with the original OCR warning retained. The fifth browser workflow uploads a multipage scan and checks the structured total, second-page evidence and passing validation through the isolated API and background worker. Existing browser workflows cover digital invoices, correction, review, search, comparison, duplicate warnings and failed-job retries.
 
 The latest isolated evaluation processed 13 of 14 fixtures, with the deliberately corrupt PDF as the only failure. It matched 104 of 104 scored header values across successfully processed fixtures. The separate OCR benchmark processed seven of eight scan fixtures and measured nine OCR pages. See the [OCR evaluation results](evaluation-report.md#real-ocr-verification).
 
-Read-only snapshots taken before/after backend, browser and evaluation checks showed identical hashes for all **eight development tables and all 23 uploaded original files**. Both manually uploaded test invoices and the uploaded CV remained present. Full inventory and preservation evidence are private under `data/inspection/`; they are not committed because they describe the user's local records.
+Read-only snapshots taken after the reviewed cleanup and after the automated checks showed identical hashes for all eight development tables and all 22 retained originals. Both manual invoices were re-extracted locally without changing their records. Each produced four line items and passed Decimal validation.
 
-`docs/pytest-results.xml`, `docs/browser-results.json`, `docs/evaluation-results.json` and the earlier extraction/tax reports are historical checkpoints. New automated outputs go under ignored `data/verification/` or `data/evaluation/`; tests do not overwrite these committed artifacts. Live LLM/embeddings, PostgreSQL/Redis/Celery runtime and a 1000-page benchmark remain unverified.
+`docs/pytest-results.xml`, `docs/browser-results.json`, `docs/evaluation-results.json` and the earlier extraction/tax reports are historical checkpoints. New automated outputs go under ignored `data/verification/` or `data/evaluation/`. Live Gemini results are reported separately. Live embeddings, PostgreSQL/Redis/Celery runtime and a 1,000-page benchmark remain unverified. [Evaluation report](evaluation-report.md)
 
 ## Inspect existing records
 
@@ -49,7 +49,7 @@ Read-only snapshots taken before/after backend, browser and evaluation checks sh
 .\.venv\Scripts\python scripts/inspect_records.py
 ```
 
-This opens the database read-only and writes private CSV/JSON reports to `data/inspection/`. Each row contains filename, document ID, upload timestamp/status, likely source, whether test ownership is proven and cleanup eligibility. Checksums/filenames identify fixture resemblance only. Historical browser-test correction notes are evidence of likely origin, not sufficient deletion authorization. Manually uploaded documents and unknown-origin records are preserved.
+This opens the database read-only and writes private CSV/JSON reports to `data/inspection/`. Each row contains filename, document ID, upload timestamp, status, original path, likely source and cleanup eligibility. Filenames, hashes and historical correction notes alone cannot establish that automation created a record.
 
 For a preservation check, pass `--compare-snapshot <private-snapshot.json>` to compare logical table hashes and original-file hashes. Do not publish inventories, snapshots, `.env` or databases.
 
@@ -61,7 +61,7 @@ The default command performs **no deletion**:
 .\.venv\Scripts\python scripts/cleanup_automated_records.py
 ```
 
-For the inspected development database it lists zero eligible records and retains all 23. Development deletion is refused unconditionally. Legacy records have no trustworthy run provenance, so they cannot be auto-selected even when their names/checksums match fixtures. No cleanup `--apply` command was executed during this work, including tests.
+The generic script lists zero auto-eligible development records and refuses development `--apply`. It applies to uploads carrying explicit isolated-run provenance. For the reviewed historical upload, see the one-time local cleanup below.
 
 To inspect a specific retained automation/evaluation run:
 
@@ -76,5 +76,13 @@ The optional SQLite-only apply path quarantines originals under the same run roo
 ## Prevent accidental loss
 
 Never reset/delete `data/careguide.db`, `data/uploads/` or the whole `data/` tree to clear test records. Alembic upgrades remain available; development downgrades/resets are blocked. Safe fixture generation only creates repository inputs and never uploads/seeds documents. Celery queue names and Redis key prefixes include environment/run identity; restart API/workers together after this change. These controls protect the supplied automation entry points; arbitrary manual SQL/admin file operations remain outside their authority.
+
+## Development backup and historical cleanup
+
+Before any authorized local cleanup, take a SQLite online backup with Python's `sqlite3.Connection.backup()` from the development database opened read-only. Copy the full upload tree to a private directory inside ignored `data/`. Verify the copy with `PRAGMA integrity_check` and `PRAGMA foreign_key_check`, compare the copied database with the source logically, and compare SHA-256 for each copied original. Stop active jobs and confirm the live paths, plan and verified backup still match before applying changes. Remove selected database rows and dependents in a single transaction, validate integrity, then quarantine the affected originals. Retain the backup and operation journal for recovery.
+
+The historical Playwright config used the normal development frontend. Its archived passing report matched five uploads in its two recorded test windows, supported by the exact upload order and scripted audit notes. One confirmed corrupt-PDF upload had no references from retained records and was removed. Four confirmed uploads remain because other records reference them. Other similar uploads remain for review because no equally strong run evidence was available. The generic isolated-run cleanup rules remain unchanged.
+
+The private dry run, verified database and 23-original backup, and quarantine journal are under `data/inspection/archived-browser-cleanup/`. Follow-up comparison confirmed all 22 retained records, their dependents, comparisons, users and original checksums match the backup. Both manual invoices and the résumé were preserved.
 
 Workflow references: [Playwright web servers](https://playwright.dev/docs/test-webserver), [Pydantic settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).

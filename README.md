@@ -4,7 +4,7 @@ A working local financial-document workflow: upload private files, process them 
 
 Built against the supplied **Ai Engineer Task 1.3.pdf** (seven tasks, nine deliverables). The application is intended for local demonstration; no deployment was performed. All bundled financial records are clearly synthetic.
 
-**Verified:** SQLite, digital PDF/XLSX/XLS/CSV parsing, real Tesseract OCR for image and scanned PDF uploads, Decimal validation, comparisons, manual correction, authenticated API, and Chromium workflows. Live LLM and embeddings, PostgreSQL/Redis/Celery, and 1,000-page throughput remain unverified.
+**Verified:** SQLite, digital PDF/XLSX/XLS/CSV parsing, real Tesseract OCR for image and scanned PDF uploads, live Gemini generation on bundled synthetic invoices, Decimal validation, comparisons, manual correction, authenticated API, and Chromium workflows. Live embeddings, PostgreSQL/Redis/Celery, and 1,000-page throughput remain unverified.
 
 ![Dashboard with real synthetic records](docs/dashboard-preview.png)
 
@@ -110,12 +110,12 @@ For the full target stack, start Docker Desktop, configure POSTGRES_PASSWORD and
    GEMINI_MODEL=gemini-3.5-flash-lite
    ```
 
-4. Run `.\.venv\Scripts\python -m scripts.evaluate_gemini --run-live` from the repository root. This sends three bundled synthetic invoices, including one two-page scan, and reports accuracy, validation, latency, request attempts and available token counts in `data/evaluation/<UUID>/gemini-results.json`.
+4. Run `.\.venv\Scripts\python -m scripts.evaluate_gemini --check-access` to verify model lookup without generation. After confirming free-tier quota in AI Studio, run `.\.venv\Scripts\python -m scripts.evaluate_gemini --run-live` from the repository root. The evaluation sends three bundled synthetic invoices, including one two-page scan, and reports expected and actual fields, validation, latency, request attempts and available token counts in `data/evaluation/<UUID>/gemini-results.json`.
 5. Set `EXTRACTION_MODE=gemini_auto` in the same `.env` and restart the API and any separate worker. Upload a synthetic invoice and inspect the extraction method and evidence on its detail page. Use `EXTRACTION_MODE=gemini` to send each processed invoice to Gemini, including simple documents. Use `deterministic_demo` for an offline workflow. Existing `llm` mode continues to use the configured OpenAI-compatible provider.
 
 `gemini_auto` keeps the local result when the parser has all required invoice and core line-item fields, reports no issues, passes Decimal validation and has sufficient OCR confidence. Documents routed to Gemini display `llm:gemini:<model>` after successful extraction. Provider errors are visible and can be retried through the existing job flow.
 
-Gemini receives extracted text from files routed to it. Use synthetic fixtures for free-tier verification. Check your organization's data-sharing rules and Google's data terms before sending private invoices. The request limits bound attempts and output per document. The API does not enforce project-wide spending. Live Gemini verification is blocked until a local key is configured. [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing)
+Gemini receives extracted text from files routed to it. Use synthetic fixtures for free-tier verification. Check your organization's data-sharing rules and Google's data terms before sending private invoices. The request limits bound attempts and output per document. The API does not enforce project-wide spending. [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing) · [Measured live results](docs/evaluation-report.md#gemini-invoice-extraction)
 
 ## Migrations, tests and evaluation
 
@@ -143,7 +143,7 @@ Inspect existing records without modifying them:
 .\.venv\Scripts\python scripts/cleanup_automated_records.py
 ```
 
-The inventory is saved privately to `data/inspection/records-report.csv` and JSON, including filename, ID, upload time, status, likely source and cleanup eligibility. Cleanup is **dry-run by default**. Historical fixture-looking names/checksums never establish eligibility; manually uploaded invoices, CVs and unproven records stay untouched. No cleanup deletion was executed. See [safe cleanup and recovery](docs/testing.md#optional-cleanup) for exact run selection, confirmation and quarantine behavior. Never delete a database or storage directory to clear the dashboard.
+The inventory is saved privately to `data/inspection/records-report.csv` and JSON, including filename, ID, upload time, status, likely source, original path and cleanup eligibility. The generic cleanup script is **dry-run by default** and applies only to isolated runs. Historical names and checksums alone cannot establish origin. See [backup and cleanup](docs/testing.md#development-backup-and-historical-cleanup) for the documented local recovery and the one confirmed historical Playwright upload that was removed from development.
 
 The Windows OCR run used the project-local Tesseract 5.5.4 build. It processed 13/14 files in the original evaluation and 7/8 in a dedicated scan benchmark. The deliberate corrupt files failed. The scan benchmark includes image-only, multipage and mixed PDFs. See the [measured results and limitations](docs/evaluation-report.md) and [Windows setup](docs/setup-windows.md#ocr).
 

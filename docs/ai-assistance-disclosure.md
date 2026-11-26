@@ -16,4 +16,4 @@ Gemini uses a configurable model at Google's Developer API endpoint. The SDK req
 
 ## Actual AI usage in this session
 
-Codex assisted implementation and testing of Gemini extraction. Live Gemini extraction was blocked by the absence of an API key, so the tests used mocked HTTPS responses through the official SDK. Tests used actual text from two digital invoices and actual Tesseract OCR from a two-page scan. The provider accuracy, latency and billing measurements require a separate live run. All evaluation invoices are synthetic, with expected fields recorded independently of extraction outputs.
+Codex assisted implementation and testing of Gemini extraction. The automated suite uses mocked HTTPS responses through the official SDK. After the user confirmed free-tier access, the separate live run sent text from two digital invoices and Tesseract text from a two-page scan to Gemini. All inputs were bundled synthetic fixtures with independently recorded expectations. See the [live accuracy, latency and request measurements](evaluation-report.md#gemini-invoice-extraction).

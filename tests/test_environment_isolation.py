@@ -290,6 +290,16 @@ def test_evaluation_refuses_cached_application_without_mutating_environment():
     assert dict(os.environ) == before
 
 
+def test_gemini_cli_refuses_cached_application_before_loading_credentials(monkeypatch):
+    from scripts import evaluate_gemini
+    monkeypatch.setattr(sys, 'argv', ['evaluate_gemini', '--run-live'])
+    monkeypatch.setattr(evaluate_gemini, 'read_local_gemini_key', lambda: pytest.fail('Read development key'))
+    before = dict(os.environ)
+    with pytest.raises(RuntimeError, match='separate process'):
+        evaluate_gemini.main()
+    assert dict(os.environ) == before
+
+
 def test_snapshot_comparison_cannot_overwrite_baseline_and_hide_changes(client):
     command = [sys.executable, 'scripts/inspect_records.py']
     first = subprocess.run(command, cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=15)

@@ -217,9 +217,11 @@ export default function Workspace() {
                     ? "Deterministic first, Gemini when needed"
                     : "Configured AI extraction"}
                 <span className="separator">·</span>
-                {config.ai_available
-                  ? "AI credentials configured"
-                  : "AI unavailable — no API credentials"}
+                {config.extraction_mode === "deterministic_demo"
+                  ? "Local invoice parsing"
+                  : config.ai_available
+                    ? "AI credentials configured"
+                    : "AI unavailable — no API credentials"}
                 <span className="separator">·</span>
                 {config.ocr_available ? "OCR available" : "OCR unavailable"}
               </span>

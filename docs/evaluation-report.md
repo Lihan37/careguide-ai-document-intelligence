@@ -2,13 +2,20 @@
 
 ## Gemini invoice extraction
 
-**Live verification: BLOCKED.** The local `.env` has no Gemini API key. This run sent zero live requests, incurred zero Gemini API charges, and produced no live accuracy or latency measurements.
+The original `0/3` report recorded one Gemini generation attempt for `layout-invoice.pdf`. Its adapter time was 1.718 seconds, with no token usage returned and no data to validate. The other two invoices were unattempted because the runner stops on provider failure. The local key and model metadata were verified separately. Replaying the original request reproduced HTTP 400 `INVALID_ARGUMENT` for schema complexity before extraction. The provider-facing schema now omits Pydantic defaults, titles and the large line-item array bound. The strict local schema still enforces the original constraints. [Gemini structured output limits](https://ai.google.dev/gemini-api/docs/structured-output)
 
-The official SDK was exercised with mocked HTTPS responses against two existing digital invoices and one two-page, image-only invoice read using Tesseract 5.5.4. The fixtures matched 69/69 expected checks after parsing, covering eight invoice fields per document, line counts, and printed line-item values. All three passed Decimal reconciliation. These figures measure the application’s handling of supplied responses. The run also checked page evidence, automatic routing, malformed output, rate limiting, retry caps, duplicate detection and manual correction.
+The first live run after the schema fix completed all four requests. All three invoices passed Decimal checks and matched 67/69 expected checks. Gemini copied letterhead names for the suppliers on two PDFs. The extraction instruction now prefers the full printed party name from the labeled billing block. The final run used the user-confirmed free tier and the model `gemini-3.5-flash-lite`.
 
-The complete isolated checks passed on Windows with 220 backend tests (19 Gemini tests), five Chromium tests, TypeScript, and the production build. Neither test suite reported failures or skips on the final run.
+| Synthetic fixture | Exact checks | Requests | Input tokens | Output tokens | Gemini adapter | Full pipeline |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Positioned invoice PDF | 25/25 | 1 | 628 | 442 | 6.618 s | 6.679 s |
+| Compound VAT invoice PDF | 25/25 | 1 | 597 | 442 | 2.408 s | 2.411 s |
+| Two-page image-only invoice | 19/19 | 2 | 560 | 305 | 12.163 s | 13.289 s |
+| Total | 69/69 | 4 | 1,785 | 1,189 | 21.189 s | 22.379 s |
 
-After configuring a local key, run `.\.venv\Scripts\python -m scripts.evaluate_gemini --run-live`. The script sends only the three bundled invoices and scores them against [independently recorded fixture values](../sample-data/gemini-ground-truth.json). Its private JSON report includes per-file accuracy checks and validation issues, wall-clock pipeline and provider adapter times, request attempts, and the provider’s available input, output and thinking token counts. Results for the three fixtures do not establish accuracy on other layouts.
+All three invoices passed Decimal validation. The scanned invoice used actual Tesseract OCR on both pages and preserved page 2 evidence for the total. Gemini did not return separate thinking-token counts. The score counts exact header checks, line counts and expected printed line-item values. It covers these three fixtures. The isolated Windows checks passed with 228 backend tests and five Chromium tests, no failures or skips, plus TypeScript and the production build.
+
+After configuring a local key, run the live evaluation from the repository root. The script sends only bundled invoices, scores them against independently recorded values, and identifies fixtures that were unattempted after a provider failure. Failed requests record a sanitized error category, HTTP code and recognized provider status. See the [setup and evaluation commands](../README.md#optional-gemini-extraction-on-windows) and [fixture ground truth](../sample-data/gemini-ground-truth.json).
 
 Google lists Gemini 3.5 Flash-Lite as free for standard input and output where the free tier is available. Google lists paid standard text rates of USD 0.30 per million input tokens and USD 2.50 per million output tokens, including thinking. These are published prices rather than application billing measurements. Use an eligible unbilled project to verify free-tier access. [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing)
 

@@ -13,6 +13,7 @@ from app.config import read_local_gemini_key, settings
 from app.extraction import extract
 from app.processing import ocr_available, units
 from app.validation import validate
+from scripts import evaluate_gemini
 from scripts.evaluate_gemini import score_invoice
 
 FIXTURES = Path('sample-data')
@@ -62,7 +63,10 @@ def test_sdk_contract_fixture_accuracy_and_evidence(name, monkeypatch):
         body = json.loads(request.content)
         assert set(body).isdisjoint({'tools', 'toolConfig'})
         assert body['generationConfig']['responseMimeType'] == 'application/json'
-        assert 'line_items' in body['generationConfig']['responseJsonSchema']['properties']
+        schema = body['generationConfig']['responseJsonSchema']
+        assert 'line_items' in schema['properties']
+        assert 'maxItems' not in schema['properties']['line_items']
+        assert 'default' not in schema['properties']['invoice_number']
         assert body['generationConfig']['maxOutputTokens'] == settings().gemini_max_output_tokens
         assert 'untrusted document' in body['systemInstruction']['parts'][0]['text']
         assert json.loads(body['contents'][0]['parts'][0]['text']) == {'untrusted_document': sources[len(requests)]['text']}
@@ -142,6 +146,43 @@ def test_safe_bounded_provider_failures(status, attempts, monkeypatch):
     assert failure.value.usage['input_tokens'] is None
     if status == 429:
         assert 'rate limit' in str(failure.value)
+
+
+@pytest.mark.parametrize('status, provider_status, detail, reason, category', [
+    (400, 'INVALID_ARGUMENT', 'Schema rejected', None, 'generation_config'),
+    (400, 'FAILED_PRECONDITION', 'Free tier is unavailable in your region', None, 'project_tier'),
+    (400, 'INVALID_ARGUMENT', 'Invalid request', 'API_KEY_INVALID', 'credential'),
+    (403, 'PERMISSION_DENIED', 'Permission denied', None, 'permission'),
+    (404, 'NOT_FOUND', 'Model unavailable', None, 'model_unavailable'),
+    (429, 'RESOURCE_EXHAUSTED', 'Quota exceeded', None, 'quota_or_rate_limit'),
+])
+def test_provider_failure_records_safe_http_diagnostics(status, provider_status, detail, reason, category):
+    error = {'code': status, 'status': provider_status, 'message': f'{detail}. Credential: {TEST_CREDENTIAL}'}
+    if reason:
+        error['details'] = [{'reason': reason, 'metadata': {'secret': TEST_CREDENTIAL}}]
+    with pytest.raises(gemini.GeminiExtractionError) as caught:
+        mock_extract([source('Total: 1.20')], lambda _: httpx2.Response(status, json={'error': error}))
+    failure = caught.value.usage['failure']
+    assert (failure['category'], failure['http_status'], failure['provider_status']) == (category, status, provider_status)
+    assert failure['message'] == str(caught.value)
+    assert TEST_CREDENTIAL not in json.dumps(caught.value.usage)
+
+
+def test_live_evaluation_records_unattempted_fixtures_after_provider_rejection(monkeypatch):
+    monkeypatch.setattr(evaluate_gemini, 'units', lambda *_: iter([source('Total: 1.20')]))
+    calls = []
+
+    def fail(source_units, cfg, *, api_key):
+        calls.append(source_units)
+        raise gemini.GeminiExtractionError('Gemini denied access.', {'requests': 1, 'failure': {'http_status': 403}})
+
+    monkeypatch.setattr(evaluate_gemini, 'extract_gemini', fail)
+    report = evaluate_gemini.evaluate_fixtures(settings(), TEST_CREDENTIAL, TRUTH)
+    assert len(calls) == report['request_attempts'] == report['files_attempted'] == 1
+    assert report['files_unattempted'] == 2
+    assert report['files_matching_and_validated'] == report['scored_checks'] == 0
+    assert [item['status'] for item in report['results']] == ['provider_error', 'unattempted', 'unattempted']
+    assert all('expected' in item and 'values' not in item for item in report['results'])
 
 
 def test_retry_success_and_total_request_budget(monkeypatch):

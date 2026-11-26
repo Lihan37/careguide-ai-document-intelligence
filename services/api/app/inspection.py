@@ -77,7 +77,7 @@ def inventory(connection, cfg):
         else:
             likely = 'Manual upload or unknown source; preserve'
             belongs = 'not proven; preserve'
-        result.append({'filename': document['filename'], 'document_id': document['id'], 'uploaded_at': str(document['uploaded_at']), 'status': document['status'], 'likely_source': likely, 'test_or_evaluation_run': belongs, 'cleanup_eligible': proof, 'matching_fixture_names': matches, 'original_exists': Path(document['storage_path']).is_file()})
+        result.append({'filename': document['filename'], 'document_id': document['id'], 'uploaded_at': str(document['uploaded_at']), 'status': document['status'], 'likely_source': likely, 'test_or_evaluation_run': belongs, 'cleanup_eligible': proof, 'matching_fixture_names': matches, 'original_path': document['storage_path'], 'original_exists': Path(document['storage_path']).is_file()})
     return result
 
 
