@@ -1,6 +1,6 @@
 # Tests, environment isolation and safe inspection
 
-The verification environment used Windows, Python 3.13, Node 22.17 and Tesseract 5.5.4 with English traineddata. **228 backend tests and five isolated browser workflows passed**, with zero failures and zero skips. TypeScript and the production build also passed.
+The verification environment used Windows, Python 3.13, Node 22.17 and Tesseract 5.5.4 with English traineddata. **230 backend tests and five isolated browser workflows passed**, with zero failures and zero skips. The backend count includes the live PostgreSQL, pgvector, Redis and Celery integration test. TypeScript and the production build also passed.
 
 ## Safe commands
 
@@ -25,7 +25,7 @@ To include real OCR, export `TESSERACT_CMD`, `TESSERACT_DATA_DIR` and `OCR_LANGU
 | Browser tests | APP_ENV=test, AUTOMATION_KIND=playwright; fresh database/uploads under `data/test-runs/<UUID>`, source-only frontend copy under `apps/web/.test-runs/<UUID>`, independent loopback ports and generated credentials. |
 | Evaluation | APP_ENV=evaluation, AUTOMATION_KIND=evaluation; fresh `data/evaluation/<UUID>/careguide.db`, copied `fixtures/`, `uploads/`, metrics/report files. |
 
-`scripts/runtime_env.py` creates unique roots and ownership markers. Automated settings require explicit paths, environment, automation kind and run UUID. Paths are resolved, checked against protected development locations and their environment namespace, and must have a matching ownership marker. Pytest and Playwright do not load development settings or credentials. The opt-in live Gemini CLI reads only its key and selected Gemini/OCR settings from the local file, writes to a dedicated evaluation directory, and refuses to run inside a process with cached application settings. Development cannot reuse test/evaluation paths. Automated PostgreSQL DB names must include the environment and run ID. PostgreSQL configuration is covered by tests and its runtime remains unverified.
+`scripts/runtime_env.py` creates unique roots and ownership markers. Automated settings require explicit paths, environment, automation kind and run UUID. Paths are resolved, checked against protected development locations and their environment namespace, and must have a matching ownership marker. Pytest and Playwright do not load development settings or credentials. The opt-in live Gemini CLI uses its key and selected Gemini/OCR settings from the local file and refuses to run inside a process with cached application settings. The live PostgreSQL test creates its own run database and removes that database after closing its API and worker processes.
 
 Pytest configures isolation before importing the app, migrates an isolated database through Alembic for API assertions and synchronous task dispatch for determinism, and closes/removes its run-owned database/uploads at teardown. It no longer regenerates committed fixtures. Each Playwright run migrates its own database and exercises the real local background process. It verifies `/api/environment` before each test and sends environment/run headers; the API rejects mismatched tagged requests before document insertion. New upload audit details identify the originating environment/run. Normal startup creates no fixture records.
 
@@ -41,7 +41,50 @@ The latest isolated evaluation processed 13 of 14 fixtures, with the deliberatel
 
 Read-only snapshots taken after the reviewed cleanup and after the automated checks showed identical hashes for all eight development tables and all 22 retained originals. Both manual invoices were re-extracted locally without changing their records. Each produced four line items and passed Decimal validation.
 
-`docs/pytest-results.xml`, `docs/browser-results.json`, `docs/evaluation-results.json` and the earlier extraction/tax reports are historical checkpoints. New automated outputs go under ignored `data/verification/` or `data/evaluation/`. Live Gemini results are reported separately. Live embeddings, PostgreSQL/Redis/Celery runtime and a 1,000-page benchmark remain unverified. [Evaluation report](evaluation-report.md)
+`docs/pytest-results.xml`, `docs/browser-results.json`, `docs/evaluation-results.json` and the earlier extraction/tax reports are historical checkpoints. New automated outputs go under ignored `data/verification/` or `data/evaluation/`. Local vector search, queue processing and PDF scale measurements are recorded in the [evaluation report](evaluation-report.md).
+
+## PostgreSQL, Redis and Celery verification
+
+Install the current lockfile and prime the model cache using the [README instructions](../README.md#local-semantic-search). Start Docker Desktop with Linux containers and export the Tesseract settings from [Windows OCR setup](setup-windows.md#ocr). Use two disposable containers with automatically assigned loopback ports:
+
+```powershell
+$tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+$pg = "careguide-check-pg-$tag"
+$redis = "careguide-check-redis-$tag"
+$env:POSTGRES_PASSWORD = [guid]::NewGuid().ToString('N')
+docker run --rm -d --name $pg --memory 512m --cpus 2 -e POSTGRES_PASSWORD -p 127.0.0.1::5432 pgvector/pgvector:pg17
+docker run --rm -d --name $redis --memory 128m --cpus 1 -p 127.0.0.1::6379 redis:7-alpine
+```
+
+Wait for `docker exec $pg pg_isready -U postgres` to report ready, then run:
+
+```powershell
+$pgPort = (docker port $pg 5432/tcp).Split(':')[-1]
+$redisPort = (docker port $redis 6379/tcp).Split(':')[-1]
+$env:CAREGUIDE_TEST_POSTGRES_URL = "postgresql+psycopg://postgres:$($env:POSTGRES_PASSWORD)@127.0.0.1:$pgPort/postgres"
+$env:CAREGUIDE_TEST_REDIS_URL = "redis://127.0.0.1:$redisPort/0"
+.\.venv\Scripts\python -m pytest -q tests/test_service_stack.py
+docker stop $pg $redis
+Remove-Item Env:CAREGUIDE_TEST_POSTGRES_URL,Env:CAREGUIDE_TEST_REDIS_URL,Env:POSTGRES_PASSWORD
+```
+
+For the full backend count, use `pytest -q` in the same configured environment before stopping those containers. The live integration test skips when either service URL is missing. It verifies migrations, persistence across an API restart, keyword and owner-filtered vector search, Redis queue delivery, page progress, duplicate deliveries, corrupt-file retry and simulated stale-lease recovery. Detailed metrics are saved privately under `data/verification/services-<UUID>/results.json`. The worker uses `solo` on Windows and prefork on Linux.
+
+### Ubuntu WSL alternative
+
+On Ubuntu 24.04 under WSL 2, install `postgresql-16`, `postgresql-16-pgvector` and `redis-server` using `sudo apt update` and `sudo apt install postgresql-16 postgresql-16-pgvector redis-server`. Start each service with `sudo service postgresql start` and `sudo service redis-server start`. Provision a dedicated database before using it from CareGuide:
+
+```sh
+sudo -u postgres createuser --pwprompt careguide_app
+sudo -u postgres createdb -O careguide_app careguide_sandbox
+sudo -u postgres psql -d careguide_sandbox -c 'CREATE EXTENSION IF NOT EXISTS vector'
+pg_isready
+redis-cli ping
+```
+
+Use this database, its own upload directory and matching Redis URL when launching the API and worker. Set `EXECUTION_MODE=celery` before starting both processes. Keep both processes on the same OS for compatible stored file paths. An independent WSL service install was not needed for the verified Docker infrastructure path. [pgvector installation](https://github.com/pgvector/pgvector)
+
+Run `.\.venv\Scripts\python scripts/benchmark_scaling.py` with OCR configured to reproduce the isolated PDF benchmark. Each fixture runs in a fresh Python process, and output stays under `data/evaluation/<UUID>/scaling-benchmark.json`.
 
 ## Inspect existing records
 

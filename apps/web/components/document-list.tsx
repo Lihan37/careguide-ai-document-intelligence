@@ -64,7 +64,8 @@ export function DocumentList({
         document_id: string;
         filename: string;
         excerpt: string;
-        source: unknown;
+        source: { page?: number; sheet?: string };
+        distance: number;
       }[]
     | null
   >(null);
@@ -183,18 +184,20 @@ export function DocumentList({
           <span>
             {config?.semantic_available
               ? "Find meaning with configured vector embeddings."
-              : "Unavailable: configure embedding credentials and PostgreSQL. Keyword search is available."}
+              : "Semantic search requires PostgreSQL and a configured embedding provider."}
           </span>
         </div>
       )}
       {semantic ? (
         <div className="semantic-results">
+          <h2>Semantic matches</h2>
           {semantic.length ? (
             semantic.map((r, i) => (
               <article key={i}>
                 <Link href={"/documents/" + r.document_id}>{r.filename}</Link>
                 <p>{r.excerpt}</p>
-                <Json data={r.source} />
+                {r.source.page !== undefined && <small>Page {r.source.page}</small>}
+                {r.source.sheet !== undefined && <small>Sheet {r.source.sheet}</small>}
               </article>
             ))
           ) : (

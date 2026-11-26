@@ -41,8 +41,10 @@ class Settings(BaseSettings):
     gemini_max_output_tokens: int = Field(default=4096, ge=512, le=8192)
     _gemini_api_key: SecretStr = PrivateAttr(default=SecretStr(''))
     embedding_model: str = 'text-embedding-3-small'
-    embedding_dimensions: int = 1536
+    embedding_dimensions: int = Field(default=1536, gt=0, le=16_000)
     embeddings_enabled: bool = False
+    embedding_provider: Literal['local', 'openai'] = 'openai'
+    embedding_cache_dir: Path = PROJECT_ROOT / 'data' / 'embedding-models'
     tesseract_cmd: str = ''
     tesseract_data_dir: str = ''
     ocr_language: str = Field(default='eng', pattern=r'^[a-zA-Z0-9_/-]+(?:\+[a-zA-Z0-9_/-]+)*$')

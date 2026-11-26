@@ -77,9 +77,9 @@ $env:PYTHONPATH = "$PWD\services\api;$PWD"
 .\.venv\Scripts\python -m celery -A worker.tasks:celery_app worker --pool=solo --concurrency=1 --loglevel=WARNING
 ```
 
-Celery does not officially support Windows worker production operation. Prefer the Linux worker container or WSL; `solo` is a local convenience. The Docker engine was unavailable during this session, so Compose and pgvector were not runtime verified.
+The verified Windows setup used Docker for PostgreSQL and Redis with a native Celery `solo` worker. Use a Linux worker for production. See the [isolated verification commands](testing.md#postgresql-redis-and-celery-verification).
 
-Without Docker, install PostgreSQL 17 with pgvector and Redis through WSL or a local Linux VM, create a careguide database/user, and set their connection URLs. SQLite local mode is the exact verified free alternative; it needs neither service. Do not claim pgvector functionality from SQLite tests.
+Without Docker, use the Ubuntu WSL package and startup commands in [stack verification](testing.md#ubuntu-wsl-alternative). SQLite remains available for local keyword search and process-based OCR.
 
 ## Optional provider setup
 

@@ -96,8 +96,13 @@ def run_job(job_id):
             job.stage, job.progress = 'Indexing', 90
             db.commit()
             if settings().embeddings_enabled:
-                from .search import index_document
-                index_document(db, document, source)
+                from .search import SemanticUnavailable, index_document
+                try:
+                    with db.begin_nested():
+                        index_document(db, document, source)
+                except SemanticUnavailable as exc:
+                    db.add(Audit(document_id=document.id, user_id=document.owner_id, action='semantic_indexing_failed',
+                                 detail={'reason': str(exc)}))
             db.refresh(job)
             if job.status == 'CANCELLED':
                 raise Cancelled()

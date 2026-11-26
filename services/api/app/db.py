@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, ForeignKey, String, Text, JSON, DateTime, Integer, Float, event
+from sqlalchemy import create_engine, ForeignKey, String, Text, JSON, DateTime, Integer, Float, Index, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import settings
 
@@ -27,6 +27,7 @@ class User(Base):
 
 class Document(Base):
     __tablename__ = 'documents'
+    __table_args__ = (Index('ix_documents_owner_uploaded', 'owner_id', 'uploaded_at'),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     owner_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
     filename: Mapped[str] = mapped_column(String(255))
@@ -53,6 +54,7 @@ class Document(Base):
 
 class SourceUnit(Base):
     __tablename__ = 'source_units'
+    __table_args__ = (Index('ix_source_units_document_position', 'document_id', 'position'),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     document_id: Mapped[str] = mapped_column(ForeignKey('documents.id'), index=True)
     position: Mapped[int] = mapped_column(Integer)
@@ -95,13 +97,14 @@ class Comparison(Base):
 
 class Embedding(Base):
     __tablename__ = 'document_embeddings'
+    __table_args__ = (Index('ix_document_embeddings_model_document', 'model', 'document_id'),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     document_id: Mapped[str] = mapped_column(ForeignKey('documents.id'), index=True)
     source: Mapped[dict] = mapped_column(JSON)
     text: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(100))
     from pgvector.sqlalchemy import Vector
-    vector = mapped_column(Vector(settings().embedding_dimensions))
+    vector = mapped_column(Vector().with_variant(Vector(1536), 'sqlite'))
 
 
 engine = create_engine(settings().database_url, **({'connect_args': {'check_same_thread': False, 'timeout': 30}} if settings().database_url.startswith('sqlite') else {'pool_pre_ping': True}))

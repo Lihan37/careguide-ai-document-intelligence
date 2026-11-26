@@ -4,7 +4,7 @@ A working local financial-document workflow: upload private files, process them 
 
 Built against the supplied **Ai Engineer Task 1.3.pdf** (seven tasks, nine deliverables). The application is intended for local demonstration; no deployment was performed. All bundled financial records are clearly synthetic.
 
-**Verified:** SQLite, digital PDF/XLSX/XLS/CSV parsing, real Tesseract OCR for image and scanned PDF uploads, live Gemini generation on bundled synthetic invoices, Decimal validation, comparisons, manual correction, authenticated API, and Chromium workflows. Live embeddings, PostgreSQL/Redis/Celery, and 1,000-page throughput remain unverified.
+**Verified:** SQLite and PostgreSQL with pgvector, CPU semantic search, Redis/Celery with a real worker, authenticated API, PDF/image/spreadsheet parsing, Tesseract OCR, live Gemini on bundled synthetic invoices, Decimal validation, manual correction, comparisons and Chromium workflows. See the [measured results](docs/evaluation-report.md) and [assessment compliance matrix](docs/assessment-compliance.md).
 
 ![Dashboard with real synthetic records](docs/dashboard-preview.png)
 
@@ -62,7 +62,7 @@ docker-compose.yml        PostgreSQL/pgvector, Redis, API and Linux OCR worker
 | /jobs | Live processing stage, progress, retries, cancellation and stale recovery |
 | /review | Unapproved exceptions with source-linked document review |
 | /comparison | Multi-document baseline comparison, sheet/row/column mapping, differences and saved snapshots |
-| /search | Independent keyword retrieval; optional genuine semantic search when configured |
+| /search | Independent keyword retrieval and optional pgvector semantic matches with page or sheet references |
 | /evaluation | Saved measured evaluation, methodology and capability limitations |
 | /settings | Safe provider/OCR/database configuration status and readiness check |
 
@@ -88,7 +88,9 @@ Copy values deliberately from `.env.example`; do not overwrite the generated loc
 | GEMINI_API_KEY | Gemini credential read by the native Python backend from the ignored project-root `.env` |
 | GEMINI_MODEL | Defaults to `gemini-3.5-flash-lite` |
 | GEMINI_TIMEOUT_SECONDS / GEMINI_MAX_REQUESTS / GEMINI_MAX_OUTPUT_TOKENS | Defaults of 20 seconds per request, 6 attempts per document including retries, and 4096 output tokens per request |
-| EMBEDDINGS_ENABLED / EMBEDDING_MODEL / EMBEDDING_DIMENSIONS | Optional real vector indexing; PostgreSQL required |
+| EMBEDDINGS_ENABLED / EMBEDDING_PROVIDER | Enable PostgreSQL vector indexing and choose `local` or `openai` |
+| EMBEDDING_CACHE_DIR | Local FastEmbed model files, default `data/embedding-models` |
+| EMBEDDING_MODEL / EMBEDDING_DIMENSIONS | Configurable OpenAI-compatible embedding model and dimensions |
 | TESSERACT_CMD | Native Tesseract executable path. Falls back to `tesseract` on PATH when empty. |
 | TESSERACT_DATA_DIR | Optional language-data directory containing `.traineddata` files |
 | OCR_LANGUAGE / OCR_REVIEW_THRESHOLD | Language code or combination such as `eng+ben`, and mean word confidence threshold for review (default 0.80) |
@@ -97,7 +99,17 @@ Copy values deliberately from `.env.example`; do not overwrite the generated loc
 | CURRENCY_TOLERANCES | Optional JSON currency→decimal-string tolerance overrides |
 | NEXT_PUBLIC_API_URL / CORS_ORIGIN | Browser API URL and permitted frontend origin |
 
-For the full target stack, start Docker Desktop, configure POSTGRES_PASSWORD and secrets, then `docker compose up --build -d`; start the frontend separately. Compose includes migrations and Tesseract. For infrastructure-only services and explicit native worker startup, follow [Windows setup](docs/setup-windows.md). Docker engine was unavailable here; that integration must be checked before submission. Missing Docker does not prevent the verified SQLite demo. Semantic search accurately remains disabled without real embeddings and PostgreSQL. No external paid service is required for local deterministic functionality.
+The default quick start uses SQLite and a separate local worker process. For the verified PostgreSQL/Redis route, start Docker Desktop, launch infrastructure with `docker compose up -d postgres redis`, and follow [isolated stack verification](docs/testing.md#postgresql-redis-and-celery-verification). That procedure uses a fresh PostgreSQL database and private upload directory for each run. An Ubuntu WSL alternative is documented there. The normal SQLite database and its uploads can remain in place.
+
+### Local semantic search
+
+Install the current Python lockfile and fetch the free English BGE model once from the repository root:
+
+```powershell
+.\.venv\Scripts\python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='data/embedding-models', threads=2)"
+```
+
+For a separately configured PostgreSQL application, apply Alembic migrations to that database, set `EMBEDDINGS_ENABLED=true` and `EMBEDDING_PROVIDER=local`, then start the API and worker with the same cache path and settings. Processing new originals stores 384-dimensional vectors. Reprocessing an existing document indexes it with the selected model. Keyword results remain available independently. The local model runs offline after download. [FastEmbed model reference](https://qdrant.tech/documentation/embeddings/fastembed/)
 
 ## Optional Gemini extraction on Windows
 

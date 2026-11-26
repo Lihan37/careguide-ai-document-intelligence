@@ -10,7 +10,8 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import select, func, or_, text as sqltext
+from sqlalchemy import select, func, or_, update, text as sqltext
+from sqlalchemy.exc import SQLAlchemyError
 from .config import settings, request_environment_matches
 from .db import Session, User, Document, SourceUnit, Job, Audit, Comparison, get_db, uid
 from .security import current_user, reviewer, password_check, password_hash, token
@@ -155,7 +156,8 @@ def ready(db=Depends(get_db)):
 def configuration(user=Depends(current_user)):
     cfg = settings()
     gemini = cfg.extraction_mode in {'gemini', 'gemini_auto'}
-    return {'environment': cfg.app_env, 'execution_mode': cfg.execution_mode, 'extraction_mode': cfg.extraction_mode, 'ai_available': bool(cfg.gemini_api_key if gemini else cfg.llm_api_key), 'semantic_available': bool(cfg.llm_api_key and cfg.embeddings_enabled and cfg.database_url.startswith('postgresql')), 'ocr_available': ocr_available(), 'database': 'postgresql' if cfg.database_url.startswith('postgresql') else 'sqlite', 'max_file_mb': cfg.max_file_mb, 'max_upload_files': cfg.max_upload_files, 'max_pages': cfg.max_pages, 'llm_model': cfg.gemini_model if gemini else cfg.llm_model, 'embedding_model': cfg.embedding_model, 'notice': 'Extraction method is recorded for each processed document. AI availability indicates local credentials are configured.'}
+    from .search import model_info, unavailable_reason
+    return {'environment': cfg.app_env, 'execution_mode': cfg.execution_mode, 'extraction_mode': cfg.extraction_mode, 'ai_available': bool(cfg.gemini_api_key if gemini else cfg.llm_api_key), 'semantic_available': unavailable_reason(cfg) is None, 'ocr_available': ocr_available(), 'database': 'postgresql' if cfg.database_url.startswith('postgresql') else 'sqlite', 'max_file_mb': cfg.max_file_mb, 'max_upload_files': cfg.max_upload_files, 'max_pages': cfg.max_pages, 'llm_model': cfg.gemini_model if gemini else cfg.llm_model, 'embedding_model': model_info(cfg)[0], 'notice': 'Extraction method is recorded for each processed document. AI availability indicates local credentials are configured.'}
 
 
 @app.post('/api/documents/upload', status_code=202)
@@ -216,7 +218,7 @@ def documents(q: str = Query('', max_length=500), status: str | None = None, fil
         statement = statement.where(Document.status == status)
     if file_type:
         statement = statement.where(Document.file_type == file_type)
-    total = db.scalar(select(func.count()).select_from(statement.subquery()))
+    total = db.scalar(select(func.count()).select_from(statement.with_only_columns(Document.id).subquery()))
     rows = db.scalars(statement.order_by(Document.uploaded_at.asc() if sort == 'oldest' else Document.uploaded_at.desc()).offset((page - 1) * page_size).limit(page_size))
     items = []
     for row in rows:
@@ -280,7 +282,10 @@ def source(document_id: str, page: int | None = Query(None, ge=1), user=Depends(
 @app.post('/api/documents/{document_id}/reprocess', status_code=202)
 def reprocess(document_id: str, user=Depends(reviewer), db=Depends(get_db)):
     document = owned(db, document_id, user)
-    if document.status in {'QUEUED', 'PROCESSING'}:
+    claimed = db.execute(update(Document).where(Document.id == document_id,
+                                                Document.status.not_in(('QUEUED', 'PROCESSING')))
+                         .values(status='QUEUED', error=None))
+    if claimed.rowcount != 1:
         raise HTTPException(409, 'Document already queued or processing')
     previous = db.scalar(select(Job).where(Job.document_id == document_id).order_by(Job.created_at.desc()))
     retries = previous.retries + 1 if previous else 1
@@ -288,8 +293,6 @@ def reprocess(document_id: str, user=Depends(reviewer), db=Depends(get_db)):
         raise HTTPException(409, 'Retry limit (3) reached; upload a corrected source')
     job = Job(document_id=document_id, retries=retries)
     db.add(job)
-    document.status = 'QUEUED'
-    document.error = None
     audit(db, user, document_id, 'reprocess', {'retry': retries})
     db.commit()
     try:
@@ -433,11 +436,13 @@ def comparison_detail(comparison_id: str, user=Depends(current_user), db=Depends
 
 @app.post('/api/search/semantic')
 def semantic_search(body: SemanticRequest, user=Depends(current_user), db=Depends(get_db)):
-    from .search import semantic
+    from .search import SemanticUnavailable, semantic
     try:
         return {'items': semantic(db, user.id, body.query, body.limit)}
-    except ValueError as exc:
-        raise HTTPException(503, str(exc))
+    except SemanticUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+    except SQLAlchemyError:
+        raise HTTPException(503, 'Semantic index is unavailable. Check PostgreSQL and run the configured migrations.') from None
 
 
 @app.get('/api/evaluation/results')

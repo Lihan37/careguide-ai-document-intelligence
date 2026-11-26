@@ -1,5 +1,35 @@
 # Evaluation report
 
+## PostgreSQL, pgvector and queue verification
+
+Docker provided PostgreSQL **17.12** with pgvector **0.8.7** and Redis **7.4.9** on separately assigned loopback ports. The API and a real Celery `solo` worker ran as separate Windows Python processes. A fresh PostgreSQL database migrated through revisions `0001` and `0002`, preserved a 1,536-dimensional migration sentinel, and stored genuine 384-dimensional BGE embeddings. PostgreSQL persisted uploaded records, manual corrections and comparison results across an API restart. The test inspected all three new indexes and verified the owner/time index with an `EXPLAIN` diagnostic.
+
+| Semantic query | Top result | Rank | Cosine distance | API time |
+| --- | --- | ---: | ---: | ---: |
+| electricity bill | Power statement, page 1 | 1 | 0.3091 | 0.556 s |
+| internet service subscription | Network statement, page 1 | 1 | 0.3540 | 0.012 s |
+
+Neither query had a literal keyword match. Both semantic excerpts matched the stored source text at the returned offsets and page. The first query included API-process model initialization. The corpus and query set were synthetic and small. An ownership check verified that a document transferred to another test user disappeared from the original user's semantic and direct results.
+
+Redis held the upload before the worker started. A duplicated delivery produced one processing history and one source page. A corrupt PDF failed again after an explicit retry. A simulated expired job was marked failed through the recovery endpoint and successfully reprocessed. During an eight-page image-only PDF, polling observed page counts from 0 through 8. All 25 health requests sampled during processing returned HTTP 200. The slowest sampled request took **1.67 ms**. The test recorded client-side time over loopback. See the [reproduction commands](testing.md#postgresql-redis-and-celery-verification).
+
+## PDF scale measurements
+
+The benchmark used Windows, Tesseract 5.5.4 with English traineddata, and a fresh Python process per file. Timing covers the reader, deterministic extraction and Decimal validation. Peak working set covers the Python process and its loaded libraries. Tesseract child memory, API and queue overhead, database persistence, embeddings and Gemini are outside these measurements.
+
+| Fixture | Pages | File bytes | Processing time | Peak Python working set |
+| --- | ---: | ---: | ---: | ---: |
+| Digital invoice | 1 | 3,246 | 0.036 s | 102.5 MiB |
+| Digital invoice with annexes | 24 | 6,478 | 0.070 s | 102.6 MiB |
+| Digital invoice with annexes | 96 | 16,213 | 0.157 s | 103.8 MiB |
+| Digital invoice with annexes | 1,000 | 140,086 | 1.429 s | 119.8 MiB |
+| Image-only invoice | 2 | 38,537 | 0.913 s | 128.6 MiB |
+| Image-only invoice with repeated pages | 8 | 39,350 | 3.470 s | 130.0 MiB |
+| Image-only invoice with repeated pages | 16 | 40,435 | 6.521 s | 130.6 MiB |
+| Corrupt PDF | — | 42 | 0.005 s | 98.9 MiB |
+
+Seven files processed and one was rejected as expected. The two larger scanned fixtures intentionally repeat invoice rows and raised validation issues. The digital benchmark contains one invoice and repeated short annexes. It demonstrates reader and parser behavior for that lightweight document shape. Large image-heavy PDFs, distinct content on every page and high-concurrency workloads can use more time and memory. No 1,000-page scanned benchmark was run.
+
 ## Gemini invoice extraction
 
 The original `0/3` report recorded one Gemini generation attempt for `layout-invoice.pdf`. Its adapter time was 1.718 seconds, with no token usage returned and no data to validate. The other two invoices were unattempted because the runner stops on provider failure. The local key and model metadata were verified separately. Replaying the original request reproduced HTTP 400 `INVALID_ARGUMENT` for schema complexity before extraction. The provider-facing schema now omits Pydantic defaults, titles and the large line-item array bound. The strict local schema still enforces the original constraints. [Gemini structured output limits](https://ai.google.dev/gemini-api/docs/structured-output)

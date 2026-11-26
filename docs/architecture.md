@@ -1,6 +1,6 @@
 # Architecture
 
-The assessment has seven tasks: ingestion, AI extraction, validation, backend, storage/search, frontend, and evaluation. The local implementation covers a complete deterministic workflow; provider and distributed-service integrations are supplied but require external runtime verification.
+The assessment covers ingestion, AI extraction, validation, backend APIs, storage/search, frontend workflows and evaluation. The verified paths include local SQLite, live Gemini on synthetic invoices, and PostgreSQL with Redis, a real Celery worker and local vector inference.
 
 ```mermaid
 flowchart LR
@@ -38,7 +38,7 @@ The browser calls the API directly using an HttpOnly signed session cookie; only
 
 ## Environment boundaries
 
-`Settings` identifies development, test and evaluation. Development retains the existing `.env`, `data/careguide.db` and `data/uploads` unless deliberately configured otherwise. Test/evaluation runners do not load the development `.env`; explicit database/storage paths, automation kind, canonical run UUID and matching directory ownership marker are mandatory. SQLite paths must resolve inside the matching `data/test-runs/<UUID>` or `data/evaluation/<UUID>`. Development paths, path traversal, hardlinks to the configured development database, missing configuration and mismatched identities are rejected before creating an engine. Test/evaluation PostgreSQL configurations require a separately named database containing environment/run ID; PostgreSQL runtime remains unverified.
+`Settings` identifies development, test and evaluation. The configured development database and originals stay in place. Automated application runs require explicit database/storage paths, automation kind, canonical run UUID and a matching directory ownership marker. SQLite paths must resolve inside the run root. Guards reject protected development paths, traversal, hardlinks and environment mismatches. The live PostgreSQL test creates and migrates a uniquely named run database, shuts down its processes and removes only the database it created.
 
 Pytest sets its context before importing application settings and removes its run-owned temporary files after database handles close. It reads committed fixture inputs without regenerating them. Playwright's outer runner creates a source-only frontend copy in ignored `apps/web/.test-runs/<UUID>` so the running development frontend's build cache/configuration is not reused. Its API/frontend run on separate loopback ports with separate generated credentials. `reuseExistingServer` is false, the API's environment/run identity is checked before each test, and requests carry matching environment/run headers. A development API rejects tagged test requests. Cooperative shutdown releases workers and frontend handles before deleting only the verified run-owned test directories. Reports are retained privately under `data/verification/playwright/<UUID>`.
 
@@ -50,11 +50,15 @@ Uploads retain environment, automation kind and run ID in existing audit JSON, s
 
 The default local executor runs one separate process so OCR and parsing do not block the request loop. Production-style Compose uses Redis and Celery with two workers, prefetch 1, late acknowledgments, soft/hard task limits, and container memory/CPU limits. Upload persists the document and job before dispatch. Dispatch failure is visible and manually retryable.
 
-The API closes its local executor on shutdown. Restart both API and Celery workers together when adopting environment-scoped broker queues; older default `celery` queues are not consumed by the new namespace. No broker/runtime claim is inferred from local SQLite tests.
+The API closes its local executor on shutdown. Redis verified real enqueue and consumption, and the Windows Celery `solo` worker processed OCR without blocking API health requests. Both processes use the same Redis namespace and isolated PostgreSQL database. The Linux Compose worker uses prefork with configured time limits. The real integration run measured the Windows worker configuration.
 
-A conditional SQL update claims QUEUED jobs. Duplicate deliveries do not re-execute claimed or terminal jobs. A crash after claim leaves a visible stale lease; `POST /api/jobs/recover-stale` marks expired jobs failed, then explicit reprocess creates a new attempt. This avoids infinite redelivery and silent duplicate results. Transient pre-claim connection failures have two Celery retries; processing errors are terminal, with up to three manual reprocess attempts. Corrected values survive reprocessing; raw extraction reflects the latest attempt while audit history retains human changes. Source snapshots from prior extraction attempts are not versioned separately.
+A conditional SQL update claims queued jobs and a separate atomic update prevents concurrent reprocess attempts from claiming the same inactive document. Duplicate queue deliveries did not add source rows or job attempts in the live test. Expired leases can be marked failed with `POST /api/jobs/recover-stale`, then reprocessed explicitly. Transient service connection failures have a bounded Celery retry policy. Processing errors become terminal with up to three manual reprocess attempts. Corrections and audit history survive reprocessing, and raw extraction reflects the latest attempt.
 
-Readers release rendered images after each page. Source units and progress are committed incrementally. Cancellation is cooperative at page boundaries and before completion, not immediate interruption of an active provider call. Source text is aggregated after parsing, so text memory grows with file length. Native PDF parsing and the local process do not have Celery's hard kill boundary. No 1000-page load test was run; see limitations.md.
+Readers release rendered images after each page. The worker commits source units and progress incrementally. Cancellation is checked at page boundaries and before completion. The application aggregates source text after parsing, so text memory grows with file length. See the [measured PDF sizes](evaluation-report.md) and [scaling limits](limitations.md).
+
+## Local semantic search
+
+Optional indexing embeds overlapping excerpts of at most 1,200 characters in batches of up to 16. FastEmbed runs the BGE small English model on CPU and uses cached weights at runtime. The existing OpenAI-compatible provider remains configurable. pgvector stores the chunk, model identity, vector, and exact page or sheet and character offsets when available. Retrieval filters by document owner, completed/review status, model and dimension before cosine ranking. The endpoint returns original chunk text with persisted source references. Keyword search continues through the existing parameterized text filters. Optional model failures are recorded in the processing audit while extraction and validation remain available.
 
 ## Extraction and uncertainty
 
