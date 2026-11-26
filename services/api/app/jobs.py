@@ -11,6 +11,13 @@ from .validation import validate, duplicates
 _pool = None
 
 
+def shutdown_executor():
+    global _pool
+    if _pool is not None:
+        _pool.shutdown(wait=True, cancel_futures=True)
+        _pool = None
+
+
 class Cancelled(Exception):
     pass
 

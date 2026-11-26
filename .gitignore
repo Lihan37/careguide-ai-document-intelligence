@@ -29,3 +29,4 @@ test-results/
 playwright-report/
 *.log
 *.tsbuildinfo
+.test-runs/

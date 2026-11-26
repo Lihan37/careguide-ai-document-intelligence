@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import select, func, or_, text as sqltext
-from .config import settings
+from .config import settings, request_environment_matches
 from .db import Session, User, Document, SourceUnit, Job, Audit, Comparison, get_db, uid
 from .security import current_user, reviewer, password_check, password_hash, token
 from .schemas import Login, Invoice, Correction, Review, CompareRequest, SemanticRequest
@@ -33,17 +33,23 @@ async def lifespan(app):
         if not db.scalar(select(User).where(User.username == cfg.demo_username)):
             db.add(User(username=cfg.demo_username, password_hash=password_hash(cfg.demo_password), role='reviewer'))
             db.commit()
-    yield
+    try:
+        yield
+    finally:
+        from .jobs import shutdown_executor
+        shutdown_executor()
 
 
 app = FastAPI(title='CareGuide Document Intelligence', version='1.0.0', lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=[settings().cors_origin], allow_credentials=True, allow_methods=['GET', 'POST', 'PATCH'], allow_headers=['Content-Type'])
+app.add_middleware(CORSMiddleware, allow_origins=[settings().cors_origin], allow_credentials=True, allow_methods=['GET', 'POST', 'PATCH'], allow_headers=['Content-Type', 'X-CareGuide-Environment', 'X-CareGuide-Run'])
 app.add_middleware(RequestBodyLimit)
 _requests = defaultdict(deque)
 
 
 @app.middleware('http')
 async def guard(request: Request, call_next):
+    if not request_environment_matches(settings(), request.headers.get('x-careguide-environment'), request.headers.get('x-careguide-run')):
+        return JSONResponse({'detail': 'Automation environment/run does not match this server'}, status_code=403)
     origin = request.headers.get('origin')
     if request.method in {'POST', 'PATCH', 'DELETE'} and origin and origin != settings().cors_origin:
         return JSONResponse({'detail': 'Origin rejected'}, status_code=403)
@@ -128,6 +134,11 @@ def health():
     return {'status': 'ok'}
 
 
+@app.get('/api/environment')
+def environment_identity():
+    return settings().provenance
+
+
 @app.get('/api/ready')
 def ready(db=Depends(get_db)):
     try:
@@ -143,7 +154,7 @@ def ready(db=Depends(get_db)):
 @app.get('/api/settings')
 def configuration(user=Depends(current_user)):
     cfg = settings()
-    return {'execution_mode': cfg.execution_mode, 'extraction_mode': cfg.extraction_mode, 'ai_available': bool(cfg.llm_api_key), 'semantic_available': bool(cfg.llm_api_key and cfg.embeddings_enabled and cfg.database_url.startswith('postgresql')), 'ocr_available': ocr_available(), 'database': 'postgresql' if cfg.database_url.startswith('postgresql') else 'sqlite', 'max_file_mb': cfg.max_file_mb, 'max_upload_files': cfg.max_upload_files, 'max_pages': cfg.max_pages, 'llm_model': cfg.llm_model, 'embedding_model': cfg.embedding_model, 'notice': 'Deterministic demonstration parsing is not AI. AI and semantic search require explicitly configured credentials.'}
+    return {'environment': cfg.app_env, 'execution_mode': cfg.execution_mode, 'extraction_mode': cfg.extraction_mode, 'ai_available': bool(cfg.llm_api_key), 'semantic_available': bool(cfg.llm_api_key and cfg.embeddings_enabled and cfg.database_url.startswith('postgresql')), 'ocr_available': ocr_available(), 'database': 'postgresql' if cfg.database_url.startswith('postgresql') else 'sqlite', 'max_file_mb': cfg.max_file_mb, 'max_upload_files': cfg.max_upload_files, 'max_pages': cfg.max_pages, 'llm_model': cfg.llm_model, 'embedding_model': cfg.embedding_model, 'notice': 'Deterministic demonstration parsing is not AI. AI and semantic search require explicitly configured credentials.'}
 
 
 @app.post('/api/documents/upload', status_code=202)
@@ -175,7 +186,7 @@ async def upload(files: list[UploadFile] = File(...), user=Depends(current_user)
             db.flush()
             job = Job(document_id=document.id)
             db.add(job)
-            audit(db, user, document.id, 'uploaded', {'filename': name, 'size': size})
+            audit(db, user, document.id, 'uploaded', {'filename': name, 'size': size} | cfg.provenance)
             db.commit()
             try:
                 dispatch(job.id)
@@ -429,7 +440,11 @@ def semantic_search(body: SemanticRequest, user=Depends(current_user), db=Depend
 
 @app.get('/api/evaluation/results')
 def evaluation(user=Depends(current_user)):
-    path = Path('docs/evaluation-results.json')
+    cfg = settings()
+    from .config import PROJECT_ROOT
+    path = PROJECT_ROOT / 'data/evaluation/latest-results.json' if cfg.app_env == 'development' else Path(cfg.runtime_root) / 'evaluation-results.json'
+    if not path.exists() and cfg.app_env == 'development':
+        path = PROJECT_ROOT / 'docs/evaluation-results.json'  # Historical checked-in report.
     if not path.exists():
         return {'status': 'not_run', 'notice': 'Run scripts/evaluate.py to generate actual results'}
     return json.loads(path.read_text(encoding='utf-8'))

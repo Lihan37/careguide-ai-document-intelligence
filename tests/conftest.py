@@ -1,30 +1,35 @@
 import os
-import tempfile
-import uuid
+import subprocess
+import sys
 from pathlib import Path
+from scripts.runtime_env import create_run, cleanup_run
 
-TEMP_PARENT = Path(__file__).resolve().parents[1] / 'data' / 'test-runs'
-TEMP_PARENT.mkdir(parents=True, exist_ok=True)
-TEST_ROOT = Path(tempfile.mkdtemp(prefix='careguide-tests-', dir=TEMP_PARENT))
-os.environ.update(DATABASE_URL='sqlite:///' + str(TEST_ROOT / 'test.db'), STORAGE_DIR=str(TEST_ROOT / 'uploads'), SESSION_SECRET='test-only-session-secret-32-characters-long', DEMO_PASSWORD='test-only-password-123', EXECUTION_MODE='local', EXTRACTION_MODE='deterministic_demo', EMBEDDINGS_ENABLED='false', LLM_API_KEY='')
+RUN = create_run('test', 'pytest')
+TEST_ROOT = Path(RUN['root'])
+RUN['env']['DEMO_PASSWORD'] = 'test-only-password-123'
+os.environ.update(RUN['env'])
 
 import pytest
 from fastapi.testclient import TestClient
-from app.db import Base, engine
+from app.db import engine
 from app.main import app
 
 
 def pytest_configure(config):
     # Keep test artifacts within the writable workspace on managed Windows machines.
     if config.option.basetemp is None:
-        config.option.basetemp = str(TEMP_PARENT / ('pytest-' + uuid.uuid4().hex))
+        config.option.basetemp = str(TEST_ROOT / 'pytest')
+
+
+def pytest_unconfigure(config):
+    engine.dispose()
+    cleanup_run(RUN)
 
 
 @pytest.fixture(scope='session', autouse=True)
 def database():
-    Base.metadata.create_all(engine)
-    from scripts.generate_samples import generate
-    generate()
+    subprocess.run([sys.executable, '-m', 'alembic', 'upgrade', 'head'], cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True, text=True)
+    # Committed synthetic fixtures are read-only test inputs, never startup seeds.
     yield
     engine.dispose()
 

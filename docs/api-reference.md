@@ -31,6 +31,7 @@ Base URL: `http://localhost:8000`. Interactive OpenAPI: `/docs`; machine schema:
 | GET | /api/settings | Safe capability flags, limits and model names; no secrets |
 | GET | /api/evaluation/results | Actual saved evaluation results, or explicit not-run state |
 | GET | /api/health | API liveness |
+| GET | /api/environment | Environment/automation kind/run UUID only; no credentials or storage paths |
 | GET | /api/ready | Database/broker readiness; does not assert worker liveness |
 
 Comparison mappings example:

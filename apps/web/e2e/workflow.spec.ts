@@ -1,12 +1,17 @@
 import { test, expect } from "@playwright/test";
-import fs from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(process.cwd(), "../..");
-const envText = fs
-  .readFileSync(path.join(root, ".env"), "utf8")
-  .replace(/^\uFEFF/, "");
-const password = envText.match(/^DEMO_PASSWORD=(.+)$/m)?.[1].trim();
+const context = require('./context.cjs');
+const password = context.env.DEMO_PASSWORD;
+const apiUrl = context.api_url;
+
+test.beforeEach(async ({ request }) => {
+  const response = await request.get(apiUrl + '/api/environment');
+  expect(response.ok()).toBeTruthy();
+  const identity = await response.json();
+  expect(identity).toEqual({ environment: 'test', automation_kind: 'playwright', run_id: context.run_id });
+});
 
 test('compound VAT label preserves printed tax and all four invoice items', async ({ page }) => {
   await page.goto('/');
@@ -20,7 +25,7 @@ test('compound VAT label preserves printed tax and all four invoice items', asyn
   await expect(page.getByText('Eastern Digital Solutions Ltd.', { exact: true })).toBeVisible({ timeout: 45000 });
   await expect(page.getByText('965.00', { exact: true })).toBeVisible();
   const id = new URL(page.url()).pathname.split('/').pop();
-  const response = await page.request.get(`http://localhost:8000/api/documents/${id}`);
+  const response = await page.request.get(`${apiUrl}/api/documents/${id}`);
   expect(response.ok()).toBeTruthy();
   const record = await response.json();
   expect(record.raw.invoice_number).toBe('EDS-INV-2026-042');
@@ -49,7 +54,7 @@ test('positioned invoice extracts names, currency, totals and four table rows', 
   await expect(page.getByText('CareGuide Demo Operations', { exact: true })).toBeVisible();
   await expect(page.getByText('9350.00', { exact: true })).toBeVisible();
   const documentId = new URL(page.url()).pathname.split('/').pop();
-  const response = await page.request.get(`http://localhost:8000/api/documents/${documentId}`);
+  const response = await page.request.get(`${apiUrl}/api/documents/${documentId}`);
   expect(response.ok()).toBeTruthy();
   const record = await response.json();
   expect(record.raw.invoice_number).toBe('CG-2026-001');
@@ -150,7 +155,7 @@ test("real invoice upload, processing, validation, correction, search and compar
     page.getByText("Mismatched", { exact: true }).first(),
   ).toBeVisible();
   await page.screenshot({
-    path: path.join(root, "docs/dashboard-comparison.png"),
+    path: path.join(context.root, "artifacts/dashboard-comparison.png"),
     fullPage: true,
   });
   await page.getByRole("link", { name: "Dashboard", exact: true }).click();
@@ -158,7 +163,7 @@ test("real invoice upload, processing, validation, correction, search and compar
     page.getByRole("heading", { name: "Recent documents" }),
   ).toBeVisible();
   await page.screenshot({
-    path: path.join(root, "docs/dashboard-preview.png"),
+    path: path.join(context.root, "artifacts/dashboard-preview.png"),
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -166,7 +171,7 @@ test("real invoice upload, processing, validation, correction, search and compar
     page.getByRole("heading", { name: "Dashboard", exact: true }),
   ).toBeVisible();
   await page.screenshot({
-    path: path.join(root, "docs/mobile-preview.png"),
+    path: path.join(context.root, "artifacts/mobile-preview.png"),
     fullPage: true,
   });
 });

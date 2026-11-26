@@ -15,6 +15,7 @@ if (-not (Test-Path '.env')) {
     $localPassword = [Convert]::ToBase64String($passwordBytes)
     @"
 DATABASE_URL=sqlite:///./data/careguide.db
+APP_ENV=development
 EXECUTION_MODE=local
 EXTRACTION_MODE=deterministic_demo
 SESSION_SECRET=$localSecret
@@ -26,5 +27,7 @@ DEMO_PASSWORD=$localPassword
 New-Item -ItemType Directory -Force 'data' | Out-Null
 & .\.venv\Scripts\python -m alembic upgrade head
 if ($LASTEXITCODE -ne 0) { throw 'Database migration failed' }
-& .\.venv\Scripts\python scripts/generate_samples.py
+if (-not (Test-Path 'sample-data/ground-truth.json')) {
+    & .\.venv\Scripts\python scripts/generate_samples.py
+}
 Write-Host 'Start API: .\.venv\Scripts\python -m uvicorn app.main:app --app-dir services/api --host 127.0.0.1 --port 8000'

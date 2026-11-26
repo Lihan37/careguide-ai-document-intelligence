@@ -2,6 +2,8 @@
 
 ## Implemented controls
 
+- Automation is isolated by environment, run UUID, database, storage, credentials and broker queue namespace. Settings reject development paths/missing ownership for automated runs. Playwright refuses server reuse, verifies environment identity before upload and tags requests; the API rejects mismatched environment/run headers. Development `.env` is never loaded by automated runners. Inspection is read-only; optional cleanup is dry-run by default and refuses development deletion and unproven historical records. See testing.md for confirmation/quarantine/recovery behavior.
+
 - Private originals are written to generated UUID names under configurable storage outside the web root. API requests never accept a storage path. The supplied basename is display metadata only; traversal names cannot select destinations.
 - Upload allowlist, per-file byte limit, batch count limit, signature checks, XLSX ZIP expanded-size/member count limits, macro/unsafe-member rejection, page/frame/cell/pixel limits, active PDF action/embedded-file rejection and PDF object count limits.
 - OCR uses pytesseract without a shell and a per-call timeout. Image rendering has a pixel cap; pages are released individually. Worker containers have CPU/memory and task time limits. Native parser vulnerabilities still require dependency patching and stronger production isolation.

@@ -19,7 +19,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local.ps1 
 npm.cmd ci --prefix apps/web
 ```
 
-The script creates a private ignored `.env` with random credentials, migrates SQLite, and generates fixtures. Read DEMO_PASSWORD in your editor; username is `reviewer`. It does not print secrets. No venv activation or permanent execution-policy change is required.
+The script creates a private ignored development `.env` with random credentials and migrates SQLite. Committed synthetic fixtures are reused; they are generated only if missing. It does not seed uploaded documents. Read DEMO_PASSWORD in your editor; username is `reviewer`. It does not print secrets. No venv activation or permanent execution-policy change is required.
 
 Run in separate terminals:
 
@@ -75,6 +75,7 @@ Copy values deliberately from `.env.example`; do not overwrite the generated loc
 | Variable | Purpose |
 | --- | --- |
 | DATABASE_URL | SQLite local URL or PostgreSQL psycopg URL |
+| APP_ENV | `development` by default; automated runners explicitly use `test` or `evaluation` |
 | EXECUTION_MODE | `local` separate-process fallback or `celery` |
 | REDIS_URL | Broker address in Celery mode |
 | STORAGE_DIR | Private originals, default ./data/uploads |
@@ -97,13 +98,29 @@ For the full target stack, start Docker Desktop, configure POSTGRES_PASSWORD and
 
 ```powershell
 .\.venv\Scripts\python -m alembic upgrade head
-.\.venv\Scripts\python -m pytest -q --junitxml=docs/pytest-results.xml
-.\.venv\Scripts\python scripts/generate_samples.py
+.\.venv\Scripts\python -m pytest -q --junitxml=data/verification/pytest-results.xml
 .\.venv\Scripts\python scripts/evaluate.py
 npm.cmd run build --prefix apps/web
 ```
 
-Run the API/frontend, then `npm.cmd run test:e2e --prefix apps/web` after `npx.cmd --prefix apps/web playwright install chromium`. [Testing methodology and exact evidence](docs/testing.md), [actual evaluation report](docs/evaluation-report.md), [machine-readable metrics](docs/evaluation-results.json).
+Run `npm.cmd run test:e2e --prefix apps/web` after `npx.cmd --prefix apps/web playwright install chromium`. It starts its own API/frontend on separate loopback ports, generates temporary credentials, migrates an isolated database, verifies the server environment, and removes its temporary database/uploads/frontend copy after stopping servers. The normal app may remain running. Direct `npx playwright test` is intentionally rejected without runner context. [Testing and isolation](docs/testing.md); checked-in evaluation reports are historical snapshots.
+
+| Environment | Database and private files |
+| --- | --- |
+| Development | Existing `.env` is preserved. Default SQLite is `data/careguide.db`; originals are in `data/uploads/`. |
+| Pytest / Playwright | Fresh `data/test-runs/<UUID>/careguide.db` and `uploads/` per run; no development `.env` loading or default-path fallback. Temporary data is removed after tests. Reports remain under `data/verification/`. |
+| Evaluation | Fresh `data/evaluation/<UUID>/careguide.db`, copied `fixtures/`, and `uploads/`; reports remain in the same run folder. No development document rows are written. The Evaluation page can read `data/evaluation/latest-results.json`. |
+
+Automation requires explicit environment, kind, run UUID, ownership marker, database and storage paths. Paths must belong to the matching run namespace. Development cannot reuse automation paths. Pytest/framework markers, browser run-identity checks and tagged-request rejection protect against accidentally using the normal API. Celery queues/key prefixes are scoped by environment/run; the verified automated runners use local processing. Alembic migrations remain supported, but development downgrades/resets are blocked.
+
+Inspect existing records without modifying them:
+
+```powershell
+.\.venv\Scripts\python scripts/inspect_records.py
+.\.venv\Scripts\python scripts/cleanup_automated_records.py
+```
+
+The inventory is saved privately to `data/inspection/records-report.csv` and JSON, including filename, ID, upload time, status, likely source and cleanup eligibility. Cleanup is **dry-run by default**. Historical fixture-looking names/checksums never establish eligibility; manually uploaded invoices, CVs and unproven records stay untouched. No cleanup deletion was executed. See [safe cleanup and recovery](docs/testing.md#optional-cleanup) for exact run selection, confirmation and quarantine behavior. Never delete a database or storage directory to clear the dashboard.
 
 The measured initial evaluation had 8/14 processing successes, 42.86% failures including five unavailable-OCR fixtures and deliberately corrupt PDF. Eight header fields on the eight successful synthetic documents matched ground truth (64/64). This is not overall AI accuracy or performance on arbitrary layouts. Re-run and consult the report for latest measured timing. No large-file benchmark was performed.
 
