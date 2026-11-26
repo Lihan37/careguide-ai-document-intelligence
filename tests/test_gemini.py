@@ -98,13 +98,16 @@ def test_sdk_contract_fixture_accuracy_and_evidence(name, monkeypatch):
     ('From:', 'Billed to:', False), ('Seller:', 'Buyer:', True),
     ('Supplier:', 'Customer:', False), ('Bill From', 'Bill To', True),
     ('Issued By', 'Billed To', False),
+    ('Sender / Supplier', 'Recipient / Bill To', True),
+    ('Issued By / Supplier', 'Buyer / Customer', False),
 ])
 def test_gemini_header_roles_use_pdf_geometry(tmp_path, supplier_label, customer_label, supplier_on_left):
     supplier_x, customer_x = (44, 340) if supplier_on_left else (340, 44)
+    printed_supplier = 'Fictional Coast Supplies (Pty.) Ltd.'
     with pymupdf.open() as pdf:
         page = pdf.new_page()
         # Content order intentionally differs from visual reading order.
-        page.insert_text((supplier_x, 90), 'Fictional Coast Supplies')
+        page.insert_text((supplier_x + (20 if '/' in supplier_label else 0), 90), printed_supplier)
         page.insert_text((customer_x, 72), customer_label)
         page.insert_text((supplier_x, 72), supplier_label)
         page.insert_text((customer_x, 90), 'Example Paper Studio')
@@ -116,19 +119,61 @@ def test_gemini_header_roles_use_pdf_geometry(tmp_path, supplier_label, customer
     def swap_roles(request):
         payload = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
         context = payload['labeled_header_context']
-        assert context['supplier_name'] == f'{supplier_label}\nFictional Coast Supplies'
+        assert context['supplier_name'] == f'{supplier_label}\n{printed_supplier}'
         assert context['customer_name'] == f'{customer_label}\nExample Paper Studio'
-        return response({'supplier_name': 'Example Paper Studio', 'customer_name': 'Fictional Coast Supplies',
+        return response({'supplier_name': 'Example Paper Studio', 'customer_name': printed_supplier,
                          'invoice_date': '2091-07-24', 'currency': 'USD', 'total': 'US$500.00'})
 
     invoice, evidence, issues, _, _ = mock_extract(list(units(path, '.pdf')), swap_roles)
-    assert (invoice.supplier_name, invoice.customer_name) == ('Fictional Coast Supplies', 'Example Paper Studio')
+    assert (invoice.supplier_name, invoice.customer_name) == (printed_supplier, 'Example Paper Studio')
     assert invoice.invoice_date.isoformat() == '2091-07-24'
     assert invoice.currency == 'USD' and invoice.total == Decimal('500.00')
     assert evidence['supplier_name']['page'] == evidence['customer_name']['page'] == 1
-    assert evidence['supplier_name']['bbox'][0] == evidence['supplier_name']['label_bbox'][0] == supplier_x
+    assert evidence['supplier_name']['label_bbox'][0] == supplier_x
+    assert evidence['supplier_name']['bbox'][0] == supplier_x + (20 if '/' in supplier_label else 0)
     assert evidence['customer_name']['bbox'][0] == evidence['customer_name']['label_bbox'][0] == customer_x
     assert not issues
+
+
+@pytest.mark.parametrize('arrangement', ['separate_column', 'attached_separator', 'shared_heading'])
+def test_mixed_party_roles_require_distinct_source_columns(tmp_path, arrangement):
+    path = tmp_path / 'mixed-party-headings.pdf'
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        if arrangement == 'shared_heading':
+            page.insert_text((50, 65), 'From / Billed To')
+        else:
+            page.insert_text((50, 65), 'From /' if arrangement == 'attached_separator' else 'From')
+            page.insert_text((330, 65), 'Billed To')
+            if arrangement == 'separate_column':
+                page.insert_text((255, 65), '/')
+        page.insert_text((50, 85), 'Example Sender Co., Ltd.')
+        page.insert_text((330, 85), 'Synthetic Buyer LLC')
+        page.insert_text((50, 136), 'Invoice Date: 2031-05-01\nTotal: EUR 20.00')
+        pdf.save(path)
+
+    invoice, evidence, issues, _, _ = mock_extract(list(units(path, '.pdf')), lambda _: response({
+        'supplier_name': 'Example Sender Co., Ltd.', 'customer_name': 'Synthetic Buyer LLC',
+    }))
+    if arrangement == 'shared_heading':
+        assert invoice.supplier_name is invoice.customer_name is None
+        assert {issue['rule_id'] for issue in issues} == {'gemini_unverified_supplier_name', 'gemini_unverified_customer_name'}
+    else:
+        assert (invoice.supplier_name, invoice.customer_name) == ('Example Sender Co., Ltd.', 'Synthetic Buyer LLC')
+        assert evidence['supplier_name']['label_bbox'][0] == evidence['supplier_name']['bbox'][0] == 50
+        assert evidence['customer_name']['label_bbox'][0] == evidence['customer_name']['bbox'][0] == 330
+        if arrangement == 'attached_separator':
+            assert evidence['supplier_name']['excerpt'].startswith('From /\n')
+        assert not issues
+
+
+def test_sender_and_recipient_in_prose_do_not_verify_roles():
+    text = 'Sender account number: 123\nRecipient reference: Example Customer\nInvoice Date: 2029-01-30'
+    invoice, _, issues, _, _ = mock_extract([source(text)], lambda _: response({
+        'supplier_name': 'Sender account number', 'customer_name': 'Example Customer',
+    }))
+    assert invoice.supplier_name is invoice.customer_name is None
+    assert {issue['rule_id'] for issue in issues} == {'gemini_unverified_supplier_name', 'gemini_unverified_customer_name'}
 
 
 @pytest.mark.parametrize('printed', ['27 august 2094', '27 August, 2094', 'August 27, 2094', '2094-08-27'])

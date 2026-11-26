@@ -13,19 +13,13 @@ VERIFIED_FIELDS = PARTY_FIELDS | {'invoice_date', 'currency'}
 AMBIGUOUS_SYMBOL = re.compile(r'[$£¥]')
 
 
-def source_label(text):
-    # Treat the short heading as a role only when it is visibly a label.
-    match = re.fullmatch(r'from(?:\s*:\s*(.*))?', text.strip(), re.IGNORECASE)
-    return ('supplier_name', match[1] or '') if match else label_pair(text)
-
-
 def field_value(field, text):
     if field == 'currency':
         # Keep the association even if the declaration is conflicting. The
         # reconciliation step needs both codes with their source reference.
         return text if declared_currencies(text) or AMBIGUOUS_SYMBOL.fullmatch(text.strip()) else None
     if field in PARTY_FIELDS:
-        if (len(text) > 255 or source_label(text)[0] or not any(char.isalpha() for char in text)
+        if (len(text) > 255 or label_pair(text)[0] or not any(char.isalpha() for char in text)
                 or re.search(r'@|https?://|^\d+\s|^(?:address|phone|account|email|contact)\b', text, re.IGNORECASE)):
             return None
     return normalized(field, text)
@@ -47,24 +41,31 @@ def neighboring_value(rows, row, column, label, field):
         height = y1 - y0
         max_gap = max(110, 8 * height) if field in {'invoice_date', 'currency'} else max(36, 3 * height)
         right = [cell for cell in right if cell['bbox'][0] - x1 <= max_gap]
-        next_rows = ([cell for cell in cells if abs(cell['bbox'][0] - x0) <= max(12, 1.3 * height)
+        tolerance = max(22, 1.5 * height) if field in PARTY_FIELDS else max(12, 1.3 * height)
+        other_party_columns = [cell['bbox'][0] for cell in rows[row] if cell is not label
+                               and field in PARTY_FIELDS and label_pair(cell['text'])[0] in PARTY_FIELDS]
+        next_rows = ([cell for cell in cells if abs(cell['bbox'][0] - x0) <= tolerance
                       and 0 < cell['bbox'][1] - y0 <= max(45, 3 * height)]
                      for cells in rows[row + 1:row + 4])
     else:
+        other_party_columns = []
         next_rows = ([cell for cell in cells if cell['column'] == label['column']]
                      for cells in rows[row + 1:row + 2])
-    if right and not source_label(right[0]['text'])[0] and field_value(field, right[0]['text']) is not None:
+    if right and not label_pair(right[0]['text'])[0] and field_value(field, right[0]['text']) is not None:
         return right[0]
     below = next((cells for cells in next_rows if cells), [])
-    if len(below) == 1 and not source_label(below[0]['text'])[0]:
-        return below[0]
+    if len(below) == 1 and not label_pair(below[0]['text'])[0]:
+        candidate = below[0]
+        if not other_party_columns or all(abs(candidate['bbox'][0] - x0) < abs(candidate['bbox'][0] - neighbor)
+                                          for neighbor in other_party_columns):
+            return candidate
     return None
 
 
 def labeled_values(unit, rows):
     for row, cells in enumerate(rows):
         for column, label in enumerate(cells):
-            field, inline = source_label(label['text'])
+            field, inline = label_pair(label['text'])
             if field not in VERIFIED_FIELDS | MONETARY:
                 continue
             if inline:
@@ -81,14 +82,14 @@ def labeled_values(unit, rows):
     # A plain-text run of several headings has no reliable column alignment.
     lines = [line.strip() for line in unit['text'].splitlines() if line.strip()]
     for index, line in enumerate(lines):
-        field, inline = source_label(line)
+        field, inline = label_pair(line)
         if field not in VERIFIED_FIELDS | MONETARY:
             continue
         label = {'text': line}
         if inline:
             yield field, inline, label, label
-        elif (index + 1 < len(lines) and not source_label(lines[index + 1])[0]
-              and (index == 0 or source_label(lines[index - 1])[0] is None or source_label(lines[index - 1])[1])):
+        elif (index + 1 < len(lines) and not label_pair(lines[index + 1])[0]
+              and (index == 0 or label_pair(lines[index - 1])[0] is None or label_pair(lines[index - 1])[1])):
             yield field, lines[index + 1], label, {'text': lines[index + 1]}
 
 
@@ -96,7 +97,9 @@ def evidence(unit, label, cell, basis):
     source = {key: unit[key] for key in SOURCE_KEYS if key in unit}
     source.update({key: cell[key] for key in ('bbox', 'row', 'column', 'cell') if key in cell})
     source.update({f'label_{key}': label[key] for key in ('bbox', 'cell') if key in label})
-    excerpt = cell['text'] if label is cell else label['text'] + '\n' + cell['text']
+    excerpt = cell.get('printed', cell['text'])
+    if label is not cell:
+        excerpt = label.get('printed', label['text']) + '\n' + excerpt
     return source | {'excerpt': excerpt, 'confidence': None, 'confidence_basis': basis}
 
 
@@ -131,7 +134,7 @@ def header_observations(unit):
                 cell = row[column]
                 if field in {'unit_price', 'line_amount', 'tax_amount'} and (code := header_currency(cell['text'])[1]):
                     observations.append(('currency', code, evidence(unit, cell, cell, 'Currency in a price column heading.')))
-        elif any(source_label(cell['text'])[0] in VERIFIED_FIELDS | MONETARY for cell in row):
+        elif any(label_pair(cell['text'])[0] in VERIFIED_FIELDS | MONETARY for cell in row):
             in_table = False
         elif in_table:
             for cell in row:

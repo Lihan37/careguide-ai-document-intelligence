@@ -22,9 +22,11 @@ LABELS = {
     'issued on': 'invoice_date', 'dated': 'invoice_date', 'date': 'invoice_date',
     'supplier name': 'supplier_name', 'supplier': 'supplier_name',
     'bill from': 'supplier_name', 'billed from': 'supplier_name', 'issued by': 'supplier_name',
+    'sender': 'supplier_name', 'from': 'supplier_name',
     'vendor': 'supplier_name', 'sold by': 'supplier_name', 'seller': 'supplier_name', 'seller name': 'supplier_name',
     'customer name': 'customer_name', 'customer': 'customer_name',
     'bill to': 'customer_name', 'billed to': 'customer_name', 'sold to': 'customer_name',
+    'recipient': 'customer_name',
     'buyer': 'customer_name', 'buyer name': 'customer_name',
     'sub total': 'subtotal', 'subtotal': 'subtotal',
     'vat': 'tax', 'tax': 'tax', 'tax amount': 'tax', 'vat amount': 'tax',
@@ -195,6 +197,8 @@ def label_pair(text):
         # A bare INVOICE title is not an invoice-number field.
         return (None, '') if key(text) == 'invoice' else (ALIASES[key(text)], '')
     for label in sorted(LABELS, key=len, reverse=True):
+        if label in {'from', 'sender', 'recipient'}:
+            continue  # These words also occur in prose. Require a heading or explicit delimiter.
         pattern = r'^[ \t]*' + r'[\s_]+'.join(re.escape(part) for part in label.split()) + r'\.?\s*(?:[:#]\s*|\s+)(.+)$'
         match = re.match(pattern, text, re.IGNORECASE)
         if match:
@@ -251,6 +255,22 @@ def join_party_headings(cells):
     return joined
 
 
+def separate_party_headings(cells):
+    """Keep different roles independent when their headings occupy distinct cells."""
+    separated = list(cells)
+    for i, (left, right) in enumerate(zip(cells, cells[1:])):
+        left_text, right_text = left['text'], right['text']
+        if not (left_text.endswith('/') or right_text.startswith('/')):
+            continue
+        left_label = left_text.removesuffix('/').rstrip()
+        right_label = right_text.removeprefix('/').lstrip()
+        roles = {ALIASES.get(key(left_label)), ALIASES.get(key(right_label))}
+        if roles == PARTY_FIELDS:
+            separated[i] = left | {'text': left_label, 'printed': left_text}
+            separated[i + 1] = right | {'text': right_label, 'printed': right_text}
+    return separated
+
+
 def visual_rows(unit):
     """Reconstruct visual rows/cells from PDF words independent of drawing order."""
     words = unit.get('words', [])
@@ -272,7 +292,7 @@ def visual_rows(unit):
                 cell = cells[-1]
                 cell['text'] += ' ' + word['text']
                 cell['bbox'] = [min(cell['bbox'][0], x0), min(cell['bbox'][1], y0), max(cell['bbox'][2], x1), max(cell['bbox'][3], y1)]
-        result.append({'cells': join_party_headings(cells), 'center': row['center']})
+        result.append({'cells': join_party_headings(separate_party_headings(cells)), 'center': row['center']})
     return result
 
 
