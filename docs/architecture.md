@@ -30,7 +30,7 @@ flowchart LR
 
 ## Boundaries and rationale
 
-`services/api/app/main.py` owns HTTP boundaries and ownership checks. `processing.py` reads source files without executing macros. `extraction.py` contains the deterministic adapter, real provider adapter and exact system prompt. `validation.py` performs arithmetic using Decimal; schema monetary values are decimal strings in JSON. `comparison.py` compares structured values and applies optional sheet/row/column mappings. `jobs.py` coordinates persistent state and an atomic SQL claim. `search.py` stores genuine embedding vectors and queries cosine distance through pgvector. `worker/tasks.py` configures Celery.
+`services/api/app/main.py` owns HTTP boundaries and ownership checks. `processing.py` reads source files without executing macros. `extraction.py` routes the deterministic and provider modes. `gemini.py` implements Gemini requests, structured-response validation, and source evidence. `validation.py` performs arithmetic using Decimal; schema monetary values are decimal strings in JSON. `comparison.py` compares structured values and applies optional sheet/row/column mappings. `jobs.py` coordinates persistent state and an atomic SQL claim. `search.py` stores genuine embedding vectors and queries cosine distance through pgvector. `worker/tasks.py` configures Celery.
 
 PostgreSQL is the target deployment database; SQLite/WAL is a persistent, single-machine fallback for environments without Docker. It does not implement semantic search. JSON columns preserve provider snapshots, variable field evidence and complete comparison snapshots; stable identifying fields have ordinary indexed columns. Avoiding separate field and line-item tables keeps this assessment implementation understandable while retaining relational ownership, sources, jobs and audit relationships. See database-schema.md for the tradeoffs.
 
@@ -64,12 +64,23 @@ The worker probes installed Tesseract language models. It sends the preprocessed
 
 OCR source units store page number, recognized text, word boxes in preprocessed-image pixels, language, mean word confidence and elapsed OCR time. The invoice parser uses these units as evidence and preserves missing values. A blank or low-confidence page creates an OCR review warning. Reviewers can correct structured values while inspecting the stored source text. Corrections preserve the original OCR evidence and its warning, and the same Decimal rules check the corrected invoice.
 
-The local deterministic parser combines label aliases, adjacent/aligned PDF word coordinates, header-driven line-item tables, text-only table fallbacks and canonical spreadsheet records. Source units preserve original text, blocks and digital-PDF word bounding boxes. It handles common invoice layouts without invoice-specific constants, but does not claim universal layout understanding or AI capability. Missing/conflicting values remain null; invalid observations retain source evidence and review issues. See extraction-fix.md for the reported-layout regression and measured verification. The provider adapter sends JSON-encoded untrusted text, uses a dedicated system instruction, enables no tools, chunks requests to at most 12,000 characters, validates Pydantic output, handles refusals, and withholds conflicting chunk values. Confidence is uncalibrated and explicitly null; OCR word confidence is a separate source-quality metric. Model evidence uses the chunk location and an excerpt, not verified token-level citations. Complex multi-invoice splitting and reliable merging of differing line-item chunks remain limitations.
+The local parser uses label aliases, aligned PDF words, header-driven tables, text fallbacks and canonical spreadsheet records. Source units preserve original text, blocks and digital-PDF word bounding boxes. Missing and conflicting values remain null and invalid observations produce review issues. See [invoice layout regression](extraction-fix.md).
+
+### Gemini routing and evidence
+
+`deterministic_demo` is the default. `gemini_auto` selects Gemini when local extraction is incomplete, OCR confidence is low, or extraction or Decimal validation reports issues. `gemini` always uses Gemini. The existing `llm` mode continues to use the OpenAI-compatible adapter. All routes feed the same Decimal validation, duplicate detection and correction workflow.
+
+The native backend reads the Gemini key from its ignored local `.env`. The Google Gen AI SDK uses the Gemini Developer API endpoint with redirects and ambient proxy configuration disabled. It sends JSON-encoded document text in chunks of at most 12,000 characters, with a separate system instruction. The request enables no model tools. The adapter validates complete responses against a strict Pydantic model and verifies returned values against the original chunk before local normalization. Missing or unverified fields stay null. Conflicting header values are withheld for review and line items are collected in chunk order with per-field page or sheet evidence.
+
+Evidence records the source location, matched text, extraction method and available OCR confidence. A text match supports the value's presence. Reviewers still need to verify field assignment and line-item associations, particularly when a page repeats amounts. The adapter has no calibrated field probabilities. Layout coordinates, rows spanning chunk boundaries, repeated page rows, tax-inclusive interpretation and multi-invoice splitting remain limitations.
+
+Requests have configurable timeouts and output limits. A transient network failure or select 5xx status can use one retry within the per-document budget. HTTP 429 stops the job with a safe quota message. Provider usage audits contain request counts, available token counts and elapsed seconds. The existing manual job retry remains available.
 
 ## External references consulted
 
 - [Next.js installation](https://nextjs.org/docs/app/getting-started/installation)
 - [Structured output API](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [Gemini structured output](https://ai.google.dev/gemini-api/docs/structured-output)
 - [Celery task semantics](https://docs.celeryq.dev/en/stable/userguide/tasks.html)
 
 Exact installed backend versions are captured in requirements-lock.txt; frontend versions are locked in package-lock.json. The broad ranges in requirements.txt permit compatible updates but the locks are the reproduction inputs for this verified Windows run.

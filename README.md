@@ -82,9 +82,12 @@ Copy values deliberately from `.env.example`; do not overwrite the generated loc
 | SESSION_SECRET | At least 32 random characters; rotate to invalidate sessions |
 | DEMO_USERNAME / DEMO_PASSWORD | Local initial account; password at least 12 characters |
 | POSTGRES_PASSWORD | Required by Compose; use a strong URL-safe password |
-| EXTRACTION_MODE | `deterministic_demo` or `llm` |
+| EXTRACTION_MODE | `deterministic_demo`, `gemini_auto`, `gemini`, or `llm` |
 | LLM_API_KEY / LLM_BASE_URL / LLM_MODEL | Private structured-output provider configuration |
 | MAX_LLM_CHUNKS | Maximum provider chunks per document, default 100; not a dollar spending cap |
+| GEMINI_API_KEY | Gemini credential read by the native Python backend from the ignored project-root `.env` |
+| GEMINI_MODEL | Defaults to `gemini-3.5-flash-lite` |
+| GEMINI_TIMEOUT_SECONDS / GEMINI_MAX_REQUESTS / GEMINI_MAX_OUTPUT_TOKENS | Defaults of 20 seconds per request, 6 attempts per document including retries, and 4096 output tokens per request |
 | EMBEDDINGS_ENABLED / EMBEDDING_MODEL / EMBEDDING_DIMENSIONS | Optional real vector indexing; PostgreSQL required |
 | TESSERACT_CMD | Native Tesseract executable path. Falls back to `tesseract` on PATH when empty. |
 | TESSERACT_DATA_DIR | Optional language-data directory containing `.traineddata` files |
@@ -95,6 +98,24 @@ Copy values deliberately from `.env.example`; do not overwrite the generated loc
 | NEXT_PUBLIC_API_URL / CORS_ORIGIN | Browser API URL and permitted frontend origin |
 
 For the full target stack, start Docker Desktop, configure POSTGRES_PASSWORD and secrets, then `docker compose up --build -d`; start the frontend separately. Compose includes migrations and Tesseract. For infrastructure-only services and explicit native worker startup, follow [Windows setup](docs/setup-windows.md). Docker engine was unavailable here; that integration must be checked before submission. Missing Docker does not prevent the verified SQLite demo. Semantic search accurately remains disabled without real embeddings and PostgreSQL. No external paid service is required for local deterministic functionality.
+
+## Optional Gemini extraction on Windows
+
+1. Install the updated Python lockfile with `.\.venv\Scripts\python -m pip install -r requirements-lock.txt`.
+2. In Google AI Studio, create a Gemini API key in an eligible unbilled project. Confirm that the model is available on the project’s free tier and leave billing disabled. Google lists Gemini 3.5 Flash-Lite on the free tier where available. [Create an API key](https://aistudio.google.com/apikey) · [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing)
+3. Open the existing project-root `.env` in your editor and add the key there. Use a literal value with no shell substitution. Keep the rest of the local settings.
+
+   ```dotenv
+   GEMINI_API_KEY=<paste your Google AI Studio key here>
+   GEMINI_MODEL=gemini-3.5-flash-lite
+   ```
+
+4. Run `.\.venv\Scripts\python -m scripts.evaluate_gemini --run-live` from the repository root. This sends three bundled synthetic invoices, including one two-page scan, and reports accuracy, validation, latency, request attempts and available token counts in `data/evaluation/<UUID>/gemini-results.json`.
+5. Set `EXTRACTION_MODE=gemini_auto` in the same `.env` and restart the API and any separate worker. Upload a synthetic invoice and inspect the extraction method and evidence on its detail page. Use `EXTRACTION_MODE=gemini` to send each processed invoice to Gemini, including simple documents. Use `deterministic_demo` for an offline workflow. Existing `llm` mode continues to use the configured OpenAI-compatible provider.
+
+`gemini_auto` keeps the local result when the parser has all required invoice and core line-item fields, reports no issues, passes Decimal validation and has sufficient OCR confidence. Documents routed to Gemini display `llm:gemini:<model>` after successful extraction. Provider errors are visible and can be retried through the existing job flow.
+
+Gemini receives extracted text from files routed to it. Use synthetic fixtures for free-tier verification. Check your organization's data-sharing rules and Google's data terms before sending private invoices. The request limits bound attempts and output per document. The API does not enforce project-wide spending. Live Gemini verification is blocked until a local key is configured. [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing)
 
 ## Migrations, tests and evaluation
 

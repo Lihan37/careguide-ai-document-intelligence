@@ -5,11 +5,16 @@ import sys
 import uuid
 import json
 from typing import Literal
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def read_local_gemini_key():
+    from dotenv import dotenv_values
+    return (dotenv_values(PROJECT_ROOT / '.env', encoding='utf-8-sig', interpolate=False).get('GEMINI_API_KEY') or '').strip()
 
 
 class Settings(BaseSettings):
@@ -21,7 +26,7 @@ class Settings(BaseSettings):
     database_url: str = ''
     redis_url: str = 'redis://localhost:6379/0'
     execution_mode: str = 'local'
-    extraction_mode: str = 'deterministic_demo'
+    extraction_mode: Literal['deterministic_demo', 'llm', 'gemini', 'gemini_auto'] = 'deterministic_demo'
     storage_dir: str = ''
     session_secret: str = ''
     demo_username: str = 'reviewer'
@@ -30,6 +35,11 @@ class Settings(BaseSettings):
     llm_base_url: str = 'https://api.openai.com/v1'
     llm_model: str = 'gpt-4.1-mini'
     max_llm_chunks: int = 100
+    gemini_model: str = Field(default='gemini-3.5-flash-lite', pattern=r'^gemini-[a-z0-9.-]+$')
+    gemini_timeout_seconds: int = Field(default=20, ge=1, le=60)
+    gemini_max_requests: int = Field(default=6, ge=1, le=16)
+    gemini_max_output_tokens: int = Field(default=4096, ge=512, le=8192)
+    _gemini_api_key: SecretStr = PrivateAttr(default=SecretStr(''))
     embedding_model: str = 'text-embedding-3-small'
     embedding_dimensions: int = 1536
     embeddings_enabled: bool = False
@@ -111,6 +121,10 @@ class Settings(BaseSettings):
         return self
 
     @property
+    def gemini_api_key(self):
+        return self._gemini_api_key.get_secret_value()
+
+    @property
     def provenance(self):
         return {'environment': self.app_env, 'automation_kind': self.automation_kind or None, 'run_id': self.automation_run_id or None}
 
@@ -133,5 +147,7 @@ def settings():
     # Test/evaluation processes never read the development .env file.
     environment = os.getenv('APP_ENV', 'development')
     result = Settings(_env_file=PROJECT_ROOT / '.env' if environment == 'development' else None)
+    if result.app_env == 'development' and result.extraction_mode in {'gemini', 'gemini_auto'}:
+        result._gemini_api_key = SecretStr(read_local_gemini_key())
     Path(result.storage_dir).mkdir(parents=True, exist_ok=True)
     return result

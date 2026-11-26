@@ -2,10 +2,11 @@ import time
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 from sqlalchemy import select, update, delete
-from .db import Session, Document, Job, SourceUnit, Embedding, now
+from .db import Session, Document, Job, SourceUnit, Embedding, Audit, now
 from .config import settings
 from .processing import ProcessingError, units
 from .extraction import extract
+from .gemini import GeminiExtractionError
 from .validation import validate, duplicates
 
 _pool = None
@@ -69,6 +70,9 @@ def run_job(job_id):
             job.progress, job.stage = 75, 'Structured extraction'
             db.commit()
             invoice, evidence, issues, method, usage = extract(source)
+            if usage:
+                db.add(provider_audit(document, usage))
+                db.commit()
             document.raw = invoice.model_dump(mode='json')
             document.evidence = evidence
             document.extraction_method = method
@@ -102,9 +106,6 @@ def run_job(job_id):
             document.error = None
             job.status, job.stage, job.progress = document.status, 'Finished', 100
             job.error = None
-            if usage:
-                from .db import Audit
-                db.add(Audit(document_id=document.id, user_id=document.owner_id, action='provider_usage', detail=usage | {'model': settings().llm_model, 'cost': 'not calculated; consult provider billing'}))
         except Cancelled:
             document.status = job.status = 'CANCELLED'
             job.stage = 'Cancelled'
@@ -113,7 +114,12 @@ def run_job(job_id):
             document, job = db.get(Document, document.id), db.get(Job, job_id)
             # Never persist exception payloads that can include document data or provider secrets.
             safe_types = (ValueError, TimeoutError)
-            safe_message = isinstance(exc, ProcessingError) or (isinstance(exc, safe_types) and not settings().llm_api_key)
+            cfg = settings()
+            safe_message = isinstance(exc, (ProcessingError, GeminiExtractionError)) or (
+                isinstance(exc, safe_types) and not (cfg.llm_api_key or cfg.gemini_api_key)
+            )
+            if isinstance(exc, GeminiExtractionError) and exc.usage:
+                db.add(provider_audit(document, exc.usage))
             message = str(exc)[:300] if safe_message else type(exc).__name__ + ': processing failed; inspect configuration or retry'
             document.error = job.error = message
             document.status = job.status = 'FAILED'
@@ -121,6 +127,11 @@ def run_job(job_id):
         document.duration = time.monotonic() - started
         job.updated_at = now()
         db.commit()
+
+
+def provider_audit(document, usage):
+    detail = {'model': settings().llm_model, 'cost': 'not calculated; consult provider billing'} | usage
+    return Audit(document_id=document.id, user_id=document.owner_id, action='provider_usage', detail=detail)
 
 
 def recover_stale(db, owner_id):

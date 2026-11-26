@@ -1,5 +1,17 @@
 # Evaluation report
 
+## Gemini invoice extraction
+
+**Live verification: BLOCKED.** The local `.env` has no Gemini API key. This run sent zero live requests, incurred zero Gemini API charges, and produced no live accuracy or latency measurements.
+
+The official SDK was exercised with mocked HTTPS responses against two existing digital invoices and one two-page, image-only invoice read using Tesseract 5.5.4. The fixtures matched 69/69 expected checks after parsing, covering eight invoice fields per document, line counts, and printed line-item values. All three passed Decimal reconciliation. These figures measure the application’s handling of supplied responses. The run also checked page evidence, automatic routing, malformed output, rate limiting, retry caps, duplicate detection and manual correction.
+
+The complete isolated checks passed on Windows with 220 backend tests (19 Gemini tests), five Chromium tests, TypeScript, and the production build. Neither test suite reported failures or skips on the final run.
+
+After configuring a local key, run `.\.venv\Scripts\python -m scripts.evaluate_gemini --run-live`. The script sends only the three bundled invoices and scores them against [independently recorded fixture values](../sample-data/gemini-ground-truth.json). Its private JSON report includes per-file accuracy checks and validation issues, wall-clock pipeline and provider adapter times, request attempts, and the provider’s available input, output and thinking token counts. Results for the three fixtures do not establish accuracy on other layouts.
+
+Google lists Gemini 3.5 Flash-Lite as free for standard input and output where the free tier is available. Google lists paid standard text rates of USD 0.30 per million input tokens and USD 2.50 per million output tokens, including thinking. These are published prices rather than application billing measurements. Use an eligible unbilled project to verify free-tier access. [Gemini API pricing and data usage](https://ai.google.dev/gemini-api/docs/pricing)
+
 ## Real OCR verification
 
 Windows x64 and Tesseract 5.5.4 with `OCR_LANGUAGE=eng` were used for this run. The dedicated benchmark timed actual pixel recognition, invoice extraction and Decimal validation on the eight files in `sample-data/ocr`. It excludes HTTP upload and database persistence.

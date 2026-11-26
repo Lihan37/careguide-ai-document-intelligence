@@ -61,7 +61,7 @@ export function SettingsPage({ config }: { config: Config | null }) {
                 "AI extraction",
                 config.ai_available
                   ? "Credentials configured; live calls depend on provider"
-                  : "Unavailable — configure LLM_API_KEY",
+                  : `Unavailable — configure ${config.extraction_mode.startsWith("gemini") ? "GEMINI_API_KEY" : "LLM_API_KEY"}`,
               ],
               [
                 "Semantic search",

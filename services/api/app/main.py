@@ -154,7 +154,8 @@ def ready(db=Depends(get_db)):
 @app.get('/api/settings')
 def configuration(user=Depends(current_user)):
     cfg = settings()
-    return {'environment': cfg.app_env, 'execution_mode': cfg.execution_mode, 'extraction_mode': cfg.extraction_mode, 'ai_available': bool(cfg.llm_api_key), 'semantic_available': bool(cfg.llm_api_key and cfg.embeddings_enabled and cfg.database_url.startswith('postgresql')), 'ocr_available': ocr_available(), 'database': 'postgresql' if cfg.database_url.startswith('postgresql') else 'sqlite', 'max_file_mb': cfg.max_file_mb, 'max_upload_files': cfg.max_upload_files, 'max_pages': cfg.max_pages, 'llm_model': cfg.llm_model, 'embedding_model': cfg.embedding_model, 'notice': 'Deterministic demonstration parsing is not AI. AI and semantic search require explicitly configured credentials.'}
+    gemini = cfg.extraction_mode in {'gemini', 'gemini_auto'}
+    return {'environment': cfg.app_env, 'execution_mode': cfg.execution_mode, 'extraction_mode': cfg.extraction_mode, 'ai_available': bool(cfg.gemini_api_key if gemini else cfg.llm_api_key), 'semantic_available': bool(cfg.llm_api_key and cfg.embeddings_enabled and cfg.database_url.startswith('postgresql')), 'ocr_available': ocr_available(), 'database': 'postgresql' if cfg.database_url.startswith('postgresql') else 'sqlite', 'max_file_mb': cfg.max_file_mb, 'max_upload_files': cfg.max_upload_files, 'max_pages': cfg.max_pages, 'llm_model': cfg.gemini_model if gemini else cfg.llm_model, 'embedding_model': cfg.embedding_model, 'notice': 'Extraction method is recorded for each processed document. AI availability indicates local credentials are configured.'}
 
 
 @app.post('/api/documents/upload', status_code=202)

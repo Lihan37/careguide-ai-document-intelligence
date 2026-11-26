@@ -213,7 +213,9 @@ export default function Workspace() {
               <span>
                 {config.extraction_mode === "deterministic_demo"
                   ? "Deterministic demonstration mode"
-                  : "Configured AI extraction"}
+                  : config.extraction_mode === "gemini_auto"
+                    ? "Deterministic first, Gemini when needed"
+                    : "Configured AI extraction"}
                 <span className="separator">·</span>
                 {config.ai_available
                   ? "AI credentials configured"
